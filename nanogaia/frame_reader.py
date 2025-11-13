@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -77,7 +75,9 @@ class FrameReader:
 
         if self.frame_count > 0 and fidx >= self.frame_count:
             # Only check upper bound when frame_count is known
-            raise IndexError(f"Frame index out of range: {fidx} (total={self.frame_count})")
+            raise IndexError(
+                f"Frame index out of range: {fidx} (total={self.frame_count})"
+            )
 
         # Cache hit → return cached frame (update LRU)
         if fidx in self._cache:
