@@ -58,12 +58,13 @@ def main():
     )
     comma_dataset = CommaDataset(dataset_dir)
     comma_dataloader = DataLoader(
-        comma_dataset, batch_size=1, shuffle=True, num_workers=0
+        comma_dataset, batch_size=10, shuffle=True, num_workers=0
     )
     sample = next(iter(comma_dataloader))
     # image = sample["image"][0].numpy()
-    # velocity = sample["velocities"][0].numpy()
-    print(len(sample["image"]))
+    velocity = sample["velocities"][0].numpy()
+    # print(len(sample["image"]))
+    print(velocity)
 
 
 if __name__ == "__main__":

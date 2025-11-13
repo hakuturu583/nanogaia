@@ -1,70 +1,63 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-from typing import Optional
+from typing import List
 
-import cv2
+import av
 import numpy as np
 
 
 class FrameReader:
     """
-    Simplified HEVC FrameReader with an API similar to openpilot's FrameReader.
+    FrameReader that loads all frames of an MP4 video into memory at initialization.
 
-    - Input: HEVC (.hevc / .hvec) file
+    - Input: MP4 file (e.g., H.264 / HEVC in MP4 container)
     - Attributes:
-        - pix_fmt: pixel format to decode into ("rgb24" or "bgr24", default "rgb24")
+        - pix_fmt: pixel format to decode into ("rgb24", "bgr24", or "gray", default "rgb24")
+        - frame_count: total number of frames (int)
+        - frames: list of np.ndarray, one per frame
     - Methods:
         - get(fidx) -> np.ndarray
-          Returns frame as numpy array (with LRU caching)
+          Returns frame as numpy array (random access in O(1))
     """
 
     def __init__(
         self,
         filename: str,
         pix_fmt: str = "rgb24",
-        cache_size: int = 100,
     ) -> None:
         self.filename = filename
         self.pix_fmt = pix_fmt
-        self.cache_size = cache_size
 
-        if self.pix_fmt not in ("rgb24", "bgr24"):
+        if self.pix_fmt not in ("rgb24", "bgr24", "gray"):
             raise ValueError(f"Unsupported pix_fmt: {self.pix_fmt}")
 
-        # Open the HEVC file using OpenCV VideoCapture
-        self._cap = cv2.VideoCapture(self.filename)
-        if not self._cap.isOpened():
-            raise IOError(f"Failed to open video file: {self.filename}")
+        # Decode the entire video once and keep all frames in memory.
+        self.frames: List[np.ndarray] = []
+        self._load_all_frames()
 
-        # Total number of frames (may be -1 depending on codec/container)
-        self.frame_count: int = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.frame_count: int = len(self.frames)
+        if self.frame_count == 0:
+            raise RuntimeError(f"No video frames found in file: {self.filename}")
 
-        # LRU cache: {frame_index: np.ndarray}
-        self._cache: "OrderedDict[int, np.ndarray]" = OrderedDict()
-
-    def _read_frame(self, fidx: int) -> np.ndarray:
+    def _load_all_frames(self) -> None:
         """
-        Internal method that seeks and decodes one frame from VideoCapture.
-        Also converts pixel format according to pix_fmt.
+        Decode all frames from the video and store them as numpy arrays.
         """
-        # Seek to the target frame
-        # NOTE: Seeking precision depends on the codec/container.
-        ok = self._cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
-        if not ok:
-            raise IOError(f"Failed to seek to frame {fidx}")
+        container = av.open(self.filename)
+        try:
+            stream = container.streams.video[0]
 
-        # Read the frame
-        ret, frame = self._cap.read()
-        if not ret or frame is None:
-            raise IOError(f"Failed to read frame {fidx}")
+            for frame in container.decode(stream):
+                if self.pix_fmt == "gray":
+                    arr = frame.to_ndarray(format="gray")   # (H, W)
+                else:
+                    # "rgb24" or "bgr24"
+                    arr = frame.to_ndarray(format=self.pix_fmt)  # (H, W, 3)
 
-        # OpenCV uses BGR; convert to RGB if necessary
-        if self.pix_fmt == "rgb24":
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # "bgr24" requires no conversion
+                self.frames.append(arr)
 
-        return frame
+        finally:
+            container.close()
 
     def get(self, fidx: int) -> np.ndarray:
         """
@@ -72,37 +65,24 @@ class FrameReader:
         """
         if fidx < 0:
             raise IndexError(f"Negative frame index: {fidx}")
+        if fidx >= self.frame_count:
+            raise IndexError(f"Frame index out of range: {fidx} (total={self.frame_count})")
 
-        if self.frame_count > 0 and fidx >= self.frame_count:
-            # Only check upper bound when frame_count is known
-            raise IndexError(
-                f"Frame index out of range: {fidx} (total={self.frame_count})"
-            )
+        return self.frames[fidx]
 
-        # Cache hit → return cached frame (update LRU)
-        if fidx in self._cache:
-            frame = self._cache.pop(fidx)
-            self._cache[fidx] = frame  # Move to end (most recently used)
-            return frame
-
-        # Cache miss → decode frame
-        frame = self._read_frame(fidx)
-
-        # Insert into cache; drop the oldest if exceeding capacity
-        self._cache[fidx] = frame
-        if len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)  # Remove oldest (LRU eviction)
-
-        return frame
+    def __len__(self) -> int:
+        """Return total number of frames."""
+        return self.frame_count
 
     def close(self) -> None:
-        """Release underlying resources."""
-        if getattr(self, "_cap", None) is not None:
-            self._cap.release()
-            self._cap = None
+        """
+        Release references to cached frames.
+        Call this if you want to free memory explicitly.
+        """
+        self.frames = []
+        self.frame_count = 0
 
     def __del__(self) -> None:
-        # Ensure resources are released (though calling close() explicitly is preferred)
         try:
             self.close()
         except Exception:
