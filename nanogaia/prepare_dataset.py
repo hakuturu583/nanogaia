@@ -8,7 +8,13 @@
 # # dataset = LeRobotDataset(repo_id)
 
 from datasets import load_dataset
+from huggingface_hub import hf_hub_download
 
-# Login using e.g. `huggingface-cli login` to access this dataset
-ds = load_dataset("commaai/comma2k19")
-print(ds)
+def copy_chunk(chunk_number:int):
+    path = hf_hub_download(
+        repo_id="commaai/comma2k19",
+        repo_type="dataset",
+        filename="raw_data/Chunk_1.zip"
+    )
+
+print(path)
