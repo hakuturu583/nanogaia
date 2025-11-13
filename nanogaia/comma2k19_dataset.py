@@ -3,8 +3,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-from tools.lib.framereader import FrameReader, BaseFrameReader
 import os
+from nanogaia.frame_reader import FrameReader
 
 
 class ToTensor(object):
@@ -17,13 +17,13 @@ class CommaDataset(Dataset):
 
     def __init__(self, main_dir, transform=None):
         self.main_dir = main_dir
-        self.frame_reader = FrameReader(main_dir + "video.hevc")
+        self.frame_reader = FrameReader(main_dir + "/video.hevc")
 
-        self.gps_times = np.load(main_dir + "global_pose/frame_gps_times")
-        self.orientations = np.load(main_dir + "global_pose/frame_orientations")
-        self.positions = np.load(main_dir + "global_pose/frame_positions")
-        self.times = np.load(main_dir + "global_pose/frame_times")
-        self.velocities = np.load(main_dir + "global_pose/frame_velocities")
+        self.gps_times = np.load(main_dir + "/global_pose/frame_gps_times")
+        self.orientations = np.load(main_dir + "/global_pose/frame_orientations")
+        self.positions = np.load(main_dir + "/global_pose/frame_positions")
+        self.times = np.load(main_dir + "/global_pose/frame_times")
+        self.velocities = np.load(main_dir + "/global_pose/frame_velocities")
 
         self.transform = transform
 
@@ -54,6 +54,7 @@ def main():
     dataset_dir = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         "dataset",
+        "Chunk_1",
         "b0c9d2329ad1606b|2018-07-27--06-03-57",
         "3",
     )

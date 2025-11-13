@@ -8,9 +8,15 @@ dependencies = [
     "black>=25.11.0",
     # "datasets>=4.3.0",
     "diffusers>=0.35.2",
+    "ffmpeg>=1.4",
     "lerobot[cu124]>=0.4.0",
+    "opencv-python>=4.12.0.88",
     "transformers>=4.57.1",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 cu124 = [
