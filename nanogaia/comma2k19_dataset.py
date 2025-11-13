@@ -31,9 +31,7 @@ class CommaDataset(Dataset):
         return len(self.velocities)
 
     def __getitem__(self, idx):
-        image = np.array(
-            self.frame_reader.get(idx, pix_fmt="rgb24")[0], dtype=np.float64
-        )
+        image = np.array(self.frame_reader.get(idx)[0], dtype=np.float64)
 
         sample = {
             "image": image,
@@ -58,7 +56,14 @@ def main():
         "b0c9d2329ad1606b|2018-07-27--06-03-57",
         "3",
     )
-    ds = CommaDataset(dataset_dir)
+    comma_dataset = CommaDataset(dataset_dir)
+    comma_dataloader = DataLoader(
+        comma_dataset, batch_size=1, shuffle=True, num_workers=0
+    )
+    sample = next(iter(comma_dataloader))
+    # image = sample["image"][0].numpy()
+    # velocity = sample["velocities"][0].numpy()
+    print(len(sample["image"]))
 
 
 if __name__ == "__main__":

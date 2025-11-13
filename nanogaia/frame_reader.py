@@ -23,7 +23,7 @@ class FrameReader:
         self,
         filename: str,
         pix_fmt: str = "rgb24",
-        cache_size: int = 16,
+        cache_size: int = 100,
     ) -> None:
         self.filename = filename
         self.pix_fmt = pix_fmt
