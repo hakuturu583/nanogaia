@@ -11,6 +11,7 @@ from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 import os
 import zipfile
+import argparse
 
 
 def unzip_skip_existing(zip_path, dst_dir):
@@ -56,5 +57,9 @@ def prepare_dataset(chunk_number: int):
     unzip_skip_existing(copy_from, copy_to)
 
 
-for i in range(1, 11):
-    prepare_dataset(i)
+def main():
+    for i in range(1, 11):
+        prepare_dataset(i)
+
+if __name__ == '__main__':
+    main()
