@@ -7,7 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "black>=25.11.0",
     # "datasets>=4.3.0",
+    "diffusers>=0.35.2",
     "lerobot[cu124]>=0.4.0",
+    "transformers>=4.57.1",
 ]
 
 [project.optional-dependencies]

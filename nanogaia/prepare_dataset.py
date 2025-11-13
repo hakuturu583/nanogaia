@@ -61,5 +61,6 @@ def main():
     for i in range(1, 11):
         prepare_dataset(i)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
