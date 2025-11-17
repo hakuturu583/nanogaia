@@ -49,7 +49,7 @@ class FrameReader:
 
             for frame in container.decode(stream):
                 if self.pix_fmt == "gray":
-                    arr = frame.to_ndarray(format="gray")   # (H, W)
+                    arr = frame.to_ndarray(format="gray")  # (H, W)
                 else:
                     # "rgb24" or "bgr24"
                     arr = frame.to_ndarray(format=self.pix_fmt)  # (H, W, 3)
@@ -66,7 +66,9 @@ class FrameReader:
         if fidx < 0:
             raise IndexError(f"Negative frame index: {fidx}")
         if fidx >= self.frame_count:
-            raise IndexError(f"Frame index out of range: {fidx} (total={self.frame_count})")
+            raise IndexError(
+                f"Frame index out of range: {fidx} (total={self.frame_count})"
+            )
 
         return self.frames[fidx]
 
