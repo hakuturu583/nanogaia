@@ -1,10 +1,33 @@
-from __future__ import print_function
+from __future__ import annotations
+
+import os
+from bisect import bisect_right
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-import os
-from nanogaia.frame_reader import FrameReader
+from torch.utils.data import DataLoader, Dataset
+
+
+POSE_FILES = {
+    "gps_times": "frame_gps_times",
+    "orientations": "frame_orientations",
+    "positions": "frame_positions",
+    "times": "frame_times",
+    "velocities": "frame_velocities",
+}
+
+
+@dataclass
+class SequenceMeta:
+    path: Path
+    raw_images_dir: Path
+    pose_arrays: Dict[str, np.memmap]
+    num_frames: int
+    num_samples: int
 
 
 class ToTensor(object):
@@ -15,56 +38,129 @@ class ToTensor(object):
 
 class CommaDataset(Dataset):
 
-    def __init__(self, main_dir, transform=None):
-        self.main_dir = main_dir
-        self.frame_reader = FrameReader(main_dir + "/video.hevc")
+    FRAME_DIGITS = 5
 
-        self.gps_times = np.load(main_dir + "/global_pose/frame_gps_times")
-        self.orientations = np.load(main_dir + "/global_pose/frame_orientations")
-        self.positions = np.load(main_dir + "/global_pose/frame_positions")
-        self.times = np.load(main_dir + "/global_pose/frame_times")
-        self.velocities = np.load(main_dir + "/global_pose/frame_velocities")
-
+    def __init__(self, root_dir: str | os.PathLike, window_size: int = 24, transform=None):
+        self.root_dir = Path(root_dir)
+        self.window_size = window_size
         self.transform = transform
 
-    def __len__(self):
-        return len(self.velocities)
+        if not self.root_dir.exists():
+            raise FileNotFoundError(f"Dataset root does not exist: {self.root_dir}")
 
-    def __getitem__(self, idx):
-        image = np.array(self.frame_reader.get(idx)[0], dtype=np.float64)
+        self.sequences: List[SequenceMeta] = []
+        self.sequence_offsets: List[int] = []
+        total_samples = 0
+
+        for seq_path in self._discover_sequences():
+            meta = self._build_sequence_meta(seq_path)
+            if meta.num_samples == 0:
+                continue
+            total_samples += meta.num_samples
+            self.sequence_offsets.append(total_samples)
+            self.sequences.append(meta)
+
+        if total_samples == 0:
+            raise ValueError(
+                f"No usable sequences found under {self.root_dir} with window_size={self.window_size}"
+            )
+
+        self.total_samples = total_samples
+
+    def _discover_sequences(self) -> List[Path]:
+        """Return every directory that includes raw_images/global_pose payloads."""
+        candidates = sorted(
+            path
+            for path in self.root_dir.glob("Chunk_*/*/*")
+            if (path / "global_pose").is_dir() and (path / "raw_images").is_dir()
+        )
+        if not candidates:
+            raise ValueError(f"No sequences found under {self.root_dir}")
+        return candidates
+
+    def _build_sequence_meta(self, seq_path: Path) -> SequenceMeta:
+        pose_dir = seq_path / "global_pose"
+        pose_arrays: Dict[str, np.memmap] = {}
+        num_frames = None
+
+        for key, filename in POSE_FILES.items():
+            arr_path = pose_dir / filename
+            if not arr_path.exists():
+                raise FileNotFoundError(f"Missing pose file: {arr_path}")
+            arr = np.load(arr_path, mmap_mode="r")
+            pose_arrays[key] = arr
+            if num_frames is None:
+                num_frames = len(arr)
+            elif len(arr) != num_frames:
+                raise ValueError(
+                    f"Mismatched pose lengths in {pose_dir}: expected {num_frames}, got {len(arr)} for {filename}"
+                )
+
+        assert num_frames is not None
+        num_samples = num_frames // self.window_size
+
+        return SequenceMeta(
+            path=seq_path,
+            raw_images_dir=seq_path / "raw_images",
+            pose_arrays=pose_arrays,
+            num_frames=num_frames,
+            num_samples=num_samples,
+        )
+
+    def __len__(self):
+        return self.total_samples
+
+    def __getitem__(self, idx: int):
+        if idx < 0 or idx >= self.total_samples:
+            raise IndexError(idx)
+
+        sequence_index, data_index = self._resolve_indices(idx)
+        sequence = self.sequences[sequence_index]
+        start = data_index * self.window_size
+        end = start + self.window_size
+
+        image_sequence = self._load_image_window(sequence, start, end)
 
         sample = {
-            "image": image,
-            "gps_times": self.gps_times,
-            "orientations": self.orientations,
-            "positions": self.positions,
-            "times": self.times,
-            "velocities": self.velocities[idx],
+            "image": image_sequence,
         }
+
+        for key, arr in sequence.pose_arrays.items():
+            sample[key] = np.asarray(arr[start:end]).copy()
 
         if self.transform:
             sample = self.transform(sample)
 
         return sample
 
+    def _resolve_indices(self, index: int) -> Tuple[int, int]:
+        sequence_idx = bisect_right(self.sequence_offsets, index)
+        sequence_start = 0 if sequence_idx == 0 else self.sequence_offsets[sequence_idx - 1]
+        data_idx = index - sequence_start
+        return sequence_idx, data_idx
+
+    def _load_image_window(self, sequence: SequenceMeta, start: int, end: int) -> np.ndarray:
+        frames: List[np.ndarray] = []
+        for frame_idx in range(start, end):
+            frame_path = sequence.raw_images_dir / f"frame_{frame_idx:0{self.FRAME_DIGITS}d}.jpg"
+            frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
+            if frame is None:
+                raise FileNotFoundError(f"Unable to read frame: {frame_path}")
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame.astype(np.float32))
+
+        return np.stack(frames, axis=0)
+
 
 def main():
-    dataset_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "dataset",
-        "Chunk_1",
-        "b0c9d2329ad1606b|2018-07-27--06-03-57",
-        "3",
-    )
+    dataset_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "dataset"
     comma_dataset = CommaDataset(dataset_dir)
     comma_dataloader = DataLoader(
-        comma_dataset, batch_size=10, shuffle=False, num_workers=0
+        comma_dataset, batch_size=1, shuffle=False, num_workers=0
     )
     sample = next(iter(comma_dataloader))
-    # image = sample["image"][0].numpy()
-    velocity = sample["velocities"][0].numpy()
-    # print(len(sample["image"]))
-    print(sample["velocities"])
+    print("image window:", sample["image"].shape)
+    print("velocities window:", sample["velocities"].shape)
 
 
 if __name__ == "__main__":
