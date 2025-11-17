@@ -47,13 +47,18 @@ def convert_hevc_to_jpeg_sequence(
         # Get original size
         h, w = frame.shape[:2]
 
-        # Compute new height that is divisible by 8
-        if target_height % 8 != 0:
-            target_height = (target_height // 8) * 8  # ensure multiple of 8
+        def round_to_multiple_of_8(x):
+            return round(x / 8) * 8
 
-        # Compute new width to maintain aspect ratio
+        target_height = round_to_multiple_of_8(target_height)
+
         scale = target_height / h
         target_width = int(w * scale)
+
+        target_width = round_to_multiple_of_8(target_width)
+
+        target_width = max(8, target_width)
+        target_height = max(8, target_height)
 
         # Resize frame
         resized = cv2.resize(
