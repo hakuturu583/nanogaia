@@ -25,9 +25,12 @@ def _write_sequence(seq_path: Path, num_frames: int, start_value: int):
     base = np.arange(num_frames, dtype=np.float32) + float(start_value)
     _save_array(pose_dir / "frame_gps_times", base)
     _save_array(pose_dir / "frame_times", base + 1)
-    _save_array(pose_dir / "frame_positions", np.stack([base, base + 1, base + 2], axis=1))
     _save_array(
-        pose_dir / "frame_orientations", np.stack([base, base + 1, base + 2, base + 3], axis=1)
+        pose_dir / "frame_positions", np.stack([base, base + 1, base + 2], axis=1)
+    )
+    _save_array(
+        pose_dir / "frame_orientations",
+        np.stack([base, base + 1, base + 2, base + 3], axis=1),
     )
     _save_array(
         pose_dir / "frame_velocities",
@@ -42,10 +45,14 @@ def toy_dataset(tmp_path):
     root = tmp_path / "toy_dataset"
     info = []
     info.append(
-        _write_sequence(root / "Chunk_1" / "session_a" / "0", num_frames=8, start_value=5)
+        _write_sequence(
+            root / "Chunk_1" / "session_a" / "0", num_frames=8, start_value=5
+        )
     )
     info.append(
-        _write_sequence(root / "Chunk_2" / "session_b" / "1", num_frames=4, start_value=100)
+        _write_sequence(
+            root / "Chunk_2" / "session_b" / "1", num_frames=4, start_value=100
+        )
     )
     return root, info
 
@@ -71,7 +78,9 @@ def test_getitem_returns_correct_window_slices(toy_dataset):
 
     first = dataset[0]
     assert first["image"].shape == (4, 2, 3, 3)
-    np.testing.assert_allclose(first["velocities"][:, 0], np.arange(4) + info[0]["start_value"])
+    np.testing.assert_allclose(
+        first["velocities"][:, 0], np.arange(4) + info[0]["start_value"]
+    )
 
     last = dataset[len(dataset) - 1]
     np.testing.assert_allclose(

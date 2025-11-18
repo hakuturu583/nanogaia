@@ -20,11 +20,11 @@ from flash_attn.modules.mha import MHA as FlashMHA
 # 1. Cosmos Video Tokenizer Wrapper (CV8x8x8, 240p)
 # =========================================================
 
+
 class CosmosVideoTokenizer(nn.Module):
     """
     Wrapper around the Cosmos CV8x8x8 tokenizer.
-    Handles conversion between (B, F, C, H, W) and
-    (B, C_lat, T_lat, H_lat, W_lat).
+    Now assumes input as (B, C, T, H, W), same as the official example.
     """
 
     def __init__(
@@ -35,6 +35,14 @@ class CosmosVideoTokenizer(nn.Module):
         device: str = "cuda",
     ):
         super().__init__()
+        # Safety: float16 on CPU is not supported for avg_pool3d
+        if device == "cpu" and dtype == torch.float16:
+            print(
+                "[CosmosVideoTokenizer] Half precision is not supported on CPU, "
+                "forcing dtype=torch.float32."
+            )
+            dtype = torch.float32
+
         self.vae = AutoencoderKLCosmos.from_pretrained(
             model_id,
             subfolder=subfolder,
@@ -50,18 +58,16 @@ class CosmosVideoTokenizer(nn.Module):
         Encode raw video frames into latent space.
 
         Args:
-            video: (B, F, C, H, W), normalized to [-1, 1]
+            video: (B, C, T, H, W), normalized to [-1, 1]
 
         Returns:
             latents: (B, C_lat, T_lat, H_lat, W_lat)
         """
         if video.dim() != 5:
-            raise ValueError("video must be (B, F, C, H, W)")
+            raise ValueError("video must be (B, C, T, H, W)")
 
-        video = video.to(self.device, self.dtype)
-        video_bcfhw = video.permute(0, 2, 1, 3, 4)  # (B, C, F, H, W)
-
-        latents_dist = self.vae.encode(video_bcfhw)
+        video = video.to(self.device, self.dtype)  # already (B, C, T, H, W)
+        latents_dist = self.vae.encode(video)
         z = latents_dist.latent_dist.sample()
         return z
 
@@ -74,17 +80,17 @@ class CosmosVideoTokenizer(nn.Module):
             latents: (B, C_lat, T_lat, H_lat, W_lat)
 
         Returns:
-            video: (B, F, C, H, W), in [-1, 1]
+            video: (B, C, T, H, W), in [-1, 1]
         """
         latents = latents.to(self.device, self.dtype)
-        recon = self.vae.decode(latents).sample  # (B, C, F, H, W)
-        recon_bfchw = recon.permute(0, 2, 1, 3, 4)
-        return recon_bfchw
+        recon = self.vae.decode(latents).sample  # (B, C, T, H, W)
+        return recon
 
 
 # =========================================================
 # 2. Action Embedding (aggregates frame-rate actions into latent-rate actions)
 # =========================================================
+
 
 class ActionAggregator(nn.Module):
     """
@@ -94,7 +100,9 @@ class ActionAggregator(nn.Module):
         16 frame actions → group by 8 → 2 latent actions
     """
 
-    def __init__(self, action_dim_raw: int, group_size: int, out_dim: int, t_latent: int):
+    def __init__(
+        self, action_dim_raw: int, group_size: int, out_dim: int, t_latent: int
+    ):
         super().__init__()
         self.group_size = group_size
         self.t_latent = t_latent
@@ -136,8 +144,9 @@ class ActionEmbedding(nn.Module):
     Combines aggregated actions with positional embeddings.
     """
 
-    def __init__(self, action_dim_raw: int, group_size: int,
-                 d_model: int, t_latent: int):
+    def __init__(
+        self, action_dim_raw: int, group_size: int, d_model: int, t_latent: int
+    ):
         super().__init__()
         self.agg = ActionAggregator(action_dim_raw, group_size, d_model, t_latent)
         self.pos = nn.Embedding(t_latent, d_model)
@@ -161,6 +170,7 @@ class ActionEmbedding(nn.Module):
 # =========================================================
 # 3. LatentFlattener for CV8x8x8 (30×40 spatial, 1×1 patches)
 # =========================================================
+
 
 class LatentFlattener(nn.Module):
     """
@@ -206,13 +216,13 @@ class LatentFlattener(nn.Module):
 # 4. TokenFuser + FlashAttention2 Decoder
 # =========================================================
 
+
 class TokenFuser(nn.Module):
     """
     Fuses video tokens and action embeddings into decoder input tokens.
     """
 
-    def __init__(self, c_tok: int, d_model: int,
-                 t_latent: int, h_tok: int, w_tok: int):
+    def __init__(self, c_tok: int, d_model: int, t_latent: int, h_tok: int, w_tok: int):
         super().__init__()
         self.video_proj = nn.Linear(c_tok, d_model // 2)
         self.action_proj = nn.Linear(d_model, d_model // 2)
@@ -222,8 +232,7 @@ class TokenFuser(nn.Module):
         self.h_tok = h_tok
         self.w_tok = w_tok
 
-    def forward(self, z_tokens: torch.Tensor,
-                a_emb: torch.Tensor) -> torch.Tensor:
+    def forward(self, z_tokens: torch.Tensor, a_emb: torch.Tensor) -> torch.Tensor:
         """
         Args:
             z_tokens: (B, N, C_tok)
@@ -255,7 +264,9 @@ class FlashDecoderLayer(nn.Module):
     Single layer of a causal Transformer decoder using FlashAttention2.
     """
 
-    def __init__(self, d_model: int, n_heads: int, d_ff: int = 2048, dropout: float = 0.1):
+    def __init__(
+        self, d_model: int, n_heads: int, d_ff: int = 2048, dropout: float = 0.1
+    ):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -291,13 +302,21 @@ class FlashDecoder(nn.Module):
     A Transformer decoder made of multiple FlashDecoderLayers.
     """
 
-    def __init__(self, d_model: int, n_heads: int, num_layers: int,
-                 d_ff: int = 2048, dropout: float = 0.1):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        num_layers: int,
+        d_ff: int = 2048,
+        dropout: float = 0.1,
+    ):
         super().__init__()
-        self.layers = nn.ModuleList([
-            FlashDecoderLayer(d_model, n_heads, d_ff, dropout)
-            for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                FlashDecoderLayer(d_model, n_heads, d_ff, dropout)
+                for _ in range(num_layers)
+            ]
+        )
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -309,6 +328,7 @@ class FlashDecoder(nn.Module):
 # =========================================================
 # 5. AR Core (latent → latent) + Full Model
 # =========================================================
+
 
 class VideoARTCoreCV8x8x8(nn.Module):
     """
@@ -322,7 +342,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         c_latent: int = 16,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 2,
+        t_in_latent: int = 3,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 512,
@@ -364,8 +384,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
 
         self.to_latent_tok = nn.Linear(d_model, self.flattener.c_tok)
 
-    def forward(self, z_past: torch.Tensor,
-                actions_past: torch.Tensor) -> torch.Tensor:
+    def forward(self, z_past: torch.Tensor, actions_past: torch.Tensor) -> torch.Tensor:
         """
         Args:
             z_past:       (B, C_lat, T_in, H, W)
@@ -377,19 +396,19 @@ class VideoARTCoreCV8x8x8(nn.Module):
         B, C, T, H, W = z_past.shape
         assert T == self.t_in_latent
 
-        z_tokens = self.flattener.latent_to_tokens(z_past)    # (B, N, C_tok)
+        z_tokens = self.flattener.latent_to_tokens(z_past)  # (B, N, C_tok)
 
-        a_emb = self.action_emb(actions_past)                 # (B, T, d_model)
+        a_emb = self.action_emb(actions_past)  # (B, T, d_model)
 
-        tok = self.fuser(z_tokens, a_emb)                     # (B, N, d_model)
+        tok = self.fuser(z_tokens, a_emb)  # (B, N, d_model)
 
-        h = self.decoder(tok)                                 # (B, N, d_model)
+        h = self.decoder(tok)  # (B, N, d_model)
 
         # Extract tokens corresponding to final timestep
         N_per_t = H * W
-        last_block = h[:, -N_per_t:, :]                       # (B, H*W, d_model)
+        last_block = h[:, -N_per_t:, :]  # (B, H*W, d_model)
 
-        last_latent_tok = self.to_latent_tok(last_block)      # (B, H*W, C_tok)
+        last_latent_tok = self.to_latent_tok(last_block)  # (B, H*W, C_tok)
 
         z_future = self.flattener.tokens_to_latent(last_latent_tok, t_out=1)
         return z_future
@@ -398,7 +417,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
 class CosmosVideoARModel(nn.Module):
     """
     Full model wrapping:
-    - Cosmos Video Tokenizer
+    - Cosmos Video Tokenizer (B, C, T, H, W)
     - AR latent predictor core
     """
 
@@ -408,7 +427,7 @@ class CosmosVideoARModel(nn.Module):
         c_latent: int = 16,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 2,
+        t_in_latent: int = 3,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 512,
@@ -431,20 +450,24 @@ class CosmosVideoARModel(nn.Module):
             dim_feedforward=dim_feedforward,
         )
 
-    def forward(self, video_past: torch.Tensor,
-                actions_past: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, video_past: torch.Tensor, actions_past: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-            video_past:   (B, F_in, C, H, W)
-            actions_past: (B, F_in, D_action_raw)
+            video_past:   (B, C, T_in, H, W)
+            actions_past: (B, T_in, D_action_raw)  # per-frame actions, aligned with T_in
 
         Returns:
-            video_future_pred: (B, F_out, C, H, W)
+            video_future_pred: (B, C, T_out, H, W)
         """
+        # BCTHW -> latent (B, C_lat, T_lat, H_lat, W_lat)
         z_past = self.tokenizer.encode(video_past)
 
+        # latent AR (uses frame-level actions)
         z_future = self.core(z_past, actions_past)
 
+        # back to video (B, C, T_out, H, W)
         video_future = self.tokenizer.decode(z_future)
         return video_future
 
@@ -455,16 +478,17 @@ class CosmosVideoARModel(nn.Module):
 
 if __name__ == "__main__":
     B = 1
-    F_in = 16
+    T_in = 16
     H, W = 240, 320
     D_action_raw = 10
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
 
     tokenizer = CosmosVideoTokenizer(
         model_id="nvidia/Cosmos-1.0-Tokenizer-CV8x8x8",
         subfolder="vae",
-        dtype=torch.float16,
+        dtype=dtype,
         device=device,
     )
 
@@ -473,24 +497,31 @@ if __name__ == "__main__":
         c_latent=16,
         h_latent=30,
         w_latent=40,
-        t_in_latent=2,          
-        frames_per_latent=8,    
+        t_in_latent=3,  # expect T_lat=2 for 16 frames
+        frames_per_latent=8,  # 16 frames / 2 latent steps
         action_dim_raw=D_action_raw,
         d_model=512,
         num_layers=8,
         num_heads=8,
         dim_feedforward=2048,
-    ).to(device)
+    ).to(device=device, dtype=dtype)
 
     model.eval()
 
-    # Dummy inputs
-    video_past = torch.randn(B, F_in, 3, H, W)
-    video_past = torch.clamp(video_past, -1, 1)
+    # BCTHW
+    video_past = torch.randn(B, 3, T_in, H, W)
+    video_past = torch.clamp(video_past, -1, 1).to(device=device, dtype=dtype)
 
-    actions_past = torch.randn(B, F_in, D_action_raw).to(device)
+    # per-frame actions: (B, T_in, D)
+    actions_past = torch.randn(B, T_in, D_action_raw).to(device=device, dtype=dtype)
 
     with torch.no_grad():
+        z_past = tokenizer.encode(video_past)
+        print(
+            "z_past shape:", z_past.shape
+        )  # should be (B, 16, 2, 30, 40) approximately
+
         video_future_pred = model(video_past, actions_past)
 
+    print("video_past shape:", video_past.shape)
     print("video_future_pred shape:", video_future_pred.shape)

@@ -40,7 +40,9 @@ class CommaDataset(Dataset):
 
     FRAME_DIGITS = 5
 
-    def __init__(self, root_dir: str | os.PathLike, window_size: int = 24, transform=None):
+    def __init__(
+        self, root_dir: str | os.PathLike, window_size: int = 24, transform=None
+    ):
         self.root_dir = Path(root_dir)
         self.window_size = window_size
         self.transform = transform
@@ -135,14 +137,20 @@ class CommaDataset(Dataset):
 
     def _resolve_indices(self, index: int) -> Tuple[int, int]:
         sequence_idx = bisect_right(self.sequence_offsets, index)
-        sequence_start = 0 if sequence_idx == 0 else self.sequence_offsets[sequence_idx - 1]
+        sequence_start = (
+            0 if sequence_idx == 0 else self.sequence_offsets[sequence_idx - 1]
+        )
         data_idx = index - sequence_start
         return sequence_idx, data_idx
 
-    def _load_image_window(self, sequence: SequenceMeta, start: int, end: int) -> np.ndarray:
+    def _load_image_window(
+        self, sequence: SequenceMeta, start: int, end: int
+    ) -> np.ndarray:
         frames: List[np.ndarray] = []
         for frame_idx in range(start, end):
-            frame_path = sequence.raw_images_dir / f"frame_{frame_idx:0{self.FRAME_DIGITS}d}.jpg"
+            frame_path = (
+                sequence.raw_images_dir / f"frame_{frame_idx:0{self.FRAME_DIGITS}d}.jpg"
+            )
             frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
             if frame is None:
                 raise FileNotFoundError(f"Unable to read frame: {frame_path}")
