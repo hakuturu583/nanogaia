@@ -173,7 +173,7 @@ class ActionEmbedding(nn.Module):
 
 
 class LatentFlattener(nn.Module):
-    def __init__(self, c_latent: int = 16, height: int = 30, width: int = 40):
+    def __init__(self, c_latent: int = 3, height: int = 30, width: int = 40):
         super().__init__()
         self.c_latent = c_latent
         self.h = height
@@ -185,7 +185,7 @@ class LatentFlattener(nn.Module):
         z: (B, C_lat, T, H, W)
         return: (B, N=T*H*W, C_tok=C_lat)
         """
-        B, C, T, H, W = z.shape
+        B, T, C, H, W = z.shape
         assert C == self.c_latent and H == self.h and W == self.w
 
         # (B, C, T, H, W) -> (B, T, H, W, C) -> (B, T*H*W, C)
@@ -334,7 +334,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
 
     def __init__(
         self,
-        c_latent: int = 16,
+        c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 3,
@@ -411,6 +411,8 @@ class VideoARTCoreCV8x8x8(nn.Module):
         N_per_t = H * W                    # tokens per latent time step
         last_block = h_latent[:, -N_per_t:, :]  # (B, H*W, C_lat)
 
+        print(h_latent.shape, last_block.shape)
+
         # 7) tokens → latent (T_out = 1)
         z_future = self.flattener.tokens_to_latent(last_block, t_out=1)
         # z_future: (B, C_lat, 1, H, W)
@@ -427,7 +429,7 @@ class CosmosVideoARModel(nn.Module):
     def __init__(
         self,
         tokenizer: CosmosVideoTokenizer,
-        c_latent: int = 16,
+        c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 3,
@@ -497,7 +499,7 @@ if __name__ == "__main__":
 
     model = CosmosVideoARModel(
         tokenizer=tokenizer,
-        c_latent=16,
+        c_latent=3,
         h_latent=30,
         w_latent=40,
         t_in_latent=3,  # expect T_lat=2 for 16 frames
@@ -520,10 +522,6 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         z_past = tokenizer.encode(video_past)
-        print(
-            "z_past shape:", z_past.shape
-        )  # should be (B, 16, 2, 30, 40) approximately
-
         video_future_pred = model(video_past, actions_past)
 
     print("video_past shape:", video_past.shape)
