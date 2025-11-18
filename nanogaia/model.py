@@ -203,7 +203,8 @@ class LatentFlattener(nn.Module):
         assert N == t_out * H * W
 
         z = tokens.view(B, t_out, H, W, C)          # (B, T, H, W, C)
-        z = z.permute(0, 4, 1, 2, 3)               # (B, C, T, H, W)
+        z = z.permute(0, 1, 4, 2, 3)               # (B, T, C, H, W)
+        print("z shape:", z.shape)  # --- IGNORE ---
         return z
 
 
@@ -239,9 +240,6 @@ class TokenFuser(nn.Module):
         B, N, _ = z_tokens.shape
         T = self.t_latent
         Ht, Wt = self.h_tok, self.w_tok
-        print("TokenFuser input shapes:", z_tokens.shape, a_emb.shape)
-        print(N, T * Ht * Wt)
-        print(T, Ht, Wt)
         assert N == T * Ht * Wt
 
         z = self.video_proj(z_tokens)
@@ -410,14 +408,8 @@ class VideoARTCoreCV8x8x8(nn.Module):
         # 5) project back to latent channel dim
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
-        # 6) take only the last latent time step (future 1 step)
-        N_per_t = H * W                    # tokens per latent time step
-        last_block = h_latent[:, -N_per_t:, :]  # (B, H*W, C_lat)
-
-        print(h_latent.shape, last_block.shape)
-
         # 7) tokens → latent (T_out = 1)
-        z_future = self.flattener.tokens_to_latent(last_block, t_out=1)
+        z_future = self.flattener.tokens_to_latent(h_latent, t_out=16)
         # z_future: (B, C_lat, 1, H, W)
         return z_future
 
