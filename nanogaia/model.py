@@ -460,38 +460,37 @@ if __name__ == "__main__":
     D_action_raw = 10
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(device)
 
-    # tokenizer = CosmosVideoTokenizer(
-    #     model_id="nvidia/Cosmos-1.0-Tokenizer-CV8x8x8",
-    #     subfolder="vae",
-    #     dtype=torch.float16,
-    #     device=device,
-    # )
+    tokenizer = CosmosVideoTokenizer(
+        model_id="nvidia/Cosmos-1.0-Tokenizer-CV8x8x8",
+        subfolder="vae",
+        dtype=torch.float16,
+        device=device,
+    )
 
-    # model = CosmosVideoARModel(
-    #     tokenizer=tokenizer,
-    #     c_latent=16,
-    #     h_latent=30,
-    #     w_latent=40,
-    #     t_in_latent=2,          
-    #     frames_per_latent=8,    
-    #     action_dim_raw=D_action_raw,
-    #     d_model=512,
-    #     num_layers=8,
-    #     num_heads=8,
-    #     dim_feedforward=2048,
-    # ).to(device)
+    model = CosmosVideoARModel(
+        tokenizer=tokenizer,
+        c_latent=16,
+        h_latent=30,
+        w_latent=40,
+        t_in_latent=2,          
+        frames_per_latent=8,    
+        action_dim_raw=D_action_raw,
+        d_model=512,
+        num_layers=8,
+        num_heads=8,
+        dim_feedforward=2048,
+    ).to(device)
 
-    # model.eval()
+    model.eval()
 
-    # # Dummy inputs
-    # video_past = torch.randn(B, F_in, 3, H, W)
-    # video_past = torch.clamp(video_past, -1, 1)
+    # Dummy inputs
+    video_past = torch.randn(B, F_in, 3, H, W)
+    video_past = torch.clamp(video_past, -1, 1)
 
-    # actions_past = torch.randn(B, F_in, D_action_raw).to(device)
+    actions_past = torch.randn(B, F_in, D_action_raw).to(device)
 
-    # with torch.no_grad():
-    #     video_future_pred = model(video_past, actions_past)
+    with torch.no_grad():
+        video_future_pred = model(video_past, actions_past)
 
-    # print("video_future_pred shape:", video_future_pred.shape)
+    print("video_future_pred shape:", video_future_pred.shape)
