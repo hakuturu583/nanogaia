@@ -239,6 +239,9 @@ class TokenFuser(nn.Module):
         B, N, _ = z_tokens.shape
         T = self.t_latent
         Ht, Wt = self.h_tok, self.w_tok
+        print("TokenFuser input shapes:", z_tokens.shape, a_emb.shape)
+        print(N, T * Ht * Wt)
+        print(T, Ht, Wt)
         assert N == T * Ht * Wt
 
         z = self.video_proj(z_tokens)
@@ -337,7 +340,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 3,
+        t_in_latent: int = 16,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 512,
@@ -383,13 +386,13 @@ class VideoARTCoreCV8x8x8(nn.Module):
     def forward(self, z_past: torch.Tensor, actions_past: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            z_past:       (B, C_lat, T_in, H, W)
+            z_past:       (B, T_in, C_in, H, W)
             actions_past: (B, F_in, D_action_raw)
 
         Returns:
             z_future_pred: (B, C_lat, 1, H, W)  # 1 latent time step
         """
-        B, C, T, H, W = z_past.shape
+        B, T, C, H, W = z_past.shape
         assert T == self.t_in_latent
 
         # 1) latent → tokens
@@ -432,7 +435,7 @@ class CosmosVideoARModel(nn.Module):
         c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 3,
+        t_in_latent: int = 16,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 512,
@@ -502,7 +505,7 @@ if __name__ == "__main__":
         c_latent=3,
         h_latent=30,
         w_latent=40,
-        t_in_latent=3,  # expect T_lat=2 for 16 frames
+        t_in_latent=16,  # expect T_lat=2 for 16 frames
         frames_per_latent=8,  # 16 frames / 2 latent steps
         action_dim_raw=D_action_raw,
         d_model=512,
