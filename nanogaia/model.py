@@ -173,42 +173,37 @@ class ActionEmbedding(nn.Module):
 
 
 class LatentFlattener(nn.Module):
-    """
-    Converts latent (C, T, H, W) to tokens (N, C) and back.
-    CV8x8x8 uses 1×1 patches → tokens correspond to cells.
-    """
-
     def __init__(self, c_latent: int = 16, height: int = 30, width: int = 40):
         super().__init__()
         self.c_latent = c_latent
         self.h = height
         self.w = width
-        self.c_tok = c_latent
+        self.c_tok = c_latent  # token dim
 
     def latent_to_tokens(self, z: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-            z: (B, C_lat, T, H, W)
-
-        Returns:
-            tokens: (B, T*H*W, C_tok)
+        z: (B, C_lat, T, H, W)
+        return: (B, N=T*H*W, C_tok=C_lat)
         """
         B, C, T, H, W = z.shape
+        assert C == self.c_latent and H == self.h and W == self.w
+
+        # (B, C, T, H, W) -> (B, T, H, W, C) -> (B, T*H*W, C)
         z_flat = z.permute(0, 2, 3, 4, 1).reshape(B, T * H * W, C)
         return z_flat
 
     def tokens_to_latent(self, tokens: torch.Tensor, t_out: int) -> torch.Tensor:
         """
-        Args:
-            tokens: (B, t_out * H * W, C_tok)
-
-        Returns:
-            (B, C_lat, t_out, H, W)
+        tokens: (B, t_out * H * W, C_tok)
+        return: (B, C_lat, t_out, H, W)
         """
         B, N, C = tokens.shape
         H, W = self.h, self.w
-        z = tokens.view(B, t_out, H, W, C)
-        z = z.permute(0, 4, 1, 2, 3)
+        assert C == self.c_latent
+        assert N == t_out * H * W
+
+        z = tokens.view(B, t_out, H, W, C)          # (B, T, H, W, C)
+        z = z.permute(0, 4, 1, 2, 3)               # (B, C, T, H, W)
         return z
 
 
@@ -382,6 +377,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
             d_ff=dim_feedforward,
         )
 
+        # Transformer hidden (d_model) → VAE latent channel (C_lat)
         self.to_latent_tok = nn.Linear(d_model, self.flattener.c_tok)
 
     def forward(self, z_past: torch.Tensor, actions_past: torch.Tensor) -> torch.Tensor:
@@ -391,26 +387,33 @@ class VideoARTCoreCV8x8x8(nn.Module):
             actions_past: (B, F_in, D_action_raw)
 
         Returns:
-            z_future_pred: (B, C_lat, 1, H, W)
+            z_future_pred: (B, C_lat, 1, H, W)  # 1 latent time step
         """
         B, C, T, H, W = z_past.shape
         assert T == self.t_in_latent
 
-        z_tokens = self.flattener.latent_to_tokens(z_past)  # (B, N, C_tok)
+        # 1) latent → tokens
+        z_tokens = self.flattener.latent_to_tokens(z_past)  # (B, N=T*H*W, C_tok)
 
+        # 2) actions → (B, T, d_model)
         a_emb = self.action_emb(actions_past)  # (B, T, d_model)
 
+        # 3) fuse video tokens + action embeddings
         tok = self.fuser(z_tokens, a_emb)  # (B, N, d_model)
 
+        # 4) Transformer decoder
         h = self.decoder(tok)  # (B, N, d_model)
 
-        # Extract tokens corresponding to final timestep
-        N_per_t = H * W
-        last_block = h[:, -N_per_t:, :]  # (B, H*W, d_model)
+        # 5) project back to latent channel dim
+        h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
-        last_latent_tok = self.to_latent_tok(last_block)  # (B, H*W, C_tok)
+        # 6) take only the last latent time step (future 1 step)
+        N_per_t = H * W                    # tokens per latent time step
+        last_block = h_latent[:, -N_per_t:, :]  # (B, H*W, C_lat)
 
-        z_future = self.flattener.tokens_to_latent(last_latent_tok, t_out=1)
+        # 7) tokens → latent (T_out = 1)
+        z_future = self.flattener.tokens_to_latent(last_block, t_out=1)
+        # z_future: (B, C_lat, 1, H, W)
         return z_future
 
 
