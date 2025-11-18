@@ -11,11 +11,11 @@ dependencies = [
     "ffmpeg>=1.4",
     "opencv-python>=4.12.0.88",
     "transformers>=4.57.1",
-    "torch==2.6.0+cu124; sys_platform == 'linux'",
-    "torch==2.6.0; sys_platform == 'darwin'",
-    "torchvision==0.21.0+cu124; sys_platform == 'linux'",
-    "torchvision==0.21.0; sys_platform == 'darwin'",
-    "flash-attn; sys_platform == 'linux'",
+    "torch==2.9.1+cu130; sys_platform == 'linux'",
+    "torch==2.9.1; sys_platform == 'darwin'",
+    "torchvision==0.24.1+cu130; sys_platform == 'linux'",
+    "torchvision==0.24.1; sys_platform == 'darwin'",
+    "flash-attn==v2.7.4.post1; sys_platform == 'linux'",
 ]
 
 [build-system]
@@ -29,17 +29,17 @@ test = [
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 torchvision = [
-  { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [tool.uv.extra-build-dependencies]
