@@ -497,7 +497,7 @@ if __name__ == "__main__":
         c_latent=3,
         h_latent=30,
         w_latent=40,
-        t_in_latent=16,  # expect T_lat=2 for 16 frames
+        t_in_latent=T_in,  # expect T_lat=2 for 16 frames
         frames_per_latent=8,  # 16 frames / 2 latent steps
         action_dim_raw=D_action_raw,
         d_model=512,
@@ -518,6 +518,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         z_past = tokenizer.encode(video_past)
         video_future_pred = model(video_past, actions_past)
+        video_future_pred = video_future_pred[:, :, :T_in, :, :]  # take first T_in frames
 
     print("video_past shape:", video_past.shape)
     print("video_future_pred shape:", video_future_pred.shape)
