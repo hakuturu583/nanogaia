@@ -41,7 +41,7 @@ class CommaDataset(Dataset):
     FRAME_DIGITS = 5
 
     def __init__(
-        self, root_dir: str | os.PathLike, window_size: int = 24, transform=None
+        self, root_dir: str | os.PathLike, window_size: int = 32, transform=None
     ):
         self.root_dir = Path(root_dir)
         self.window_size = window_size
