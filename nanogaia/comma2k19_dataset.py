@@ -11,6 +11,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from nanogaia.util import (
+    ecef_vector_from_pose,
+    quaternion_difference,
+    quaternion_to_yaw,
+)
+
 
 POSE_FILES = {
     "gps_times": "frame_gps_times",
@@ -159,6 +165,25 @@ class CommaDataset(Dataset):
 
         return np.stack(frames, axis=0)
 
+    @staticmethod
+    def _get_diff_2d_pose(
+        current_orientation: np.ndarray,
+        current_position: np.ndarray,
+        next_orientation: np.ndarray,
+        next_position: np.ndarray,
+    ) -> np.ndarray:
+        """Return [x, y, yaw] from current pose to the next in the local frame."""
+
+        vector = ecef_vector_from_pose(
+            origin_position=current_position,
+            origin_orientation=current_orientation,
+            target_position=next_position,
+        )
+        components = vector.components
+        delta_quaternion = quaternion_difference(current_orientation, next_orientation)
+        yaw = quaternion_to_yaw(delta_quaternion)
+        return np.array([components[0], components[1], yaw], dtype=np.float64)
+
 
 def main():
     dataset_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "dataset"
@@ -169,6 +194,15 @@ def main():
     sample = next(iter(comma_dataloader))
     print("image window:", sample["image"].shape)
     print("velocities window:", sample["velocities"].shape)
+    print(
+        "diff 2d pose between first two frames:",
+        CommaDataset._get_diff_2d_pose(
+            sample["orientations"][0, 0].numpy(),
+            sample["positions"][0, 0].numpy(),
+            sample["orientations"][0, 1].numpy(),
+            sample["positions"][0, 1].numpy(),
+        ),
+    )
 
 
 if __name__ == "__main__":
