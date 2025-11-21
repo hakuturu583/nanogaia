@@ -446,7 +446,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         # 5) project back to latent channel dim
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
-        # 7) tokens → latent (T_out = 1)
+        # 7) tokens → latent (T_out = 16)
         z_future = self.flattener.tokens_to_latent(h_latent, t_out=16)
         # z_future: (B, C_lat, 1, H, W)
         return z_future
@@ -505,14 +505,16 @@ class CosmosVideoARModel(nn.Module):
         Returns:
             video_future_pred: (B, C, T_out, H, W)
         """
-        # BCTHW -> latent (B, C_lat, T_lat, H_lat, W_lat)
-        z_past = self.tokenizer.encode(video_past)
+        with torch.no_grad():
+            # BCTHW -> latent (B, C_lat, T_lat, H_lat, W_lat)
+            z_past = self.tokenizer.encode(video_past)
 
         # latent AR (uses frame-level actions)
         z_future = self.core(z_past, actions_past, actions_future)
 
-        # back to video (B, C, T_out, H, W)
-        video_future = self.tokenizer.decode(z_future)
+        with torch.no_grad():
+            # back to video (B, C, T_out, H, W)
+            video_future = self.tokenizer.decode(z_future)
         return video_future
 
 
