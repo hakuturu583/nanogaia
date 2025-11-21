@@ -96,10 +96,10 @@ def build_model(device: torch.device, dtype: torch.dtype) -> CosmosVideoARModel:
         t_in_latent=16,
         frames_per_latent=8,
         action_dim_raw=3,
-        d_model=512,
-        num_layers=8,
-        num_heads=8,
-        dim_feedforward=2048,
+        d_model=256,
+        num_layers=4,
+        num_heads=4,
+        dim_feedforward=1024,
         t_future_latent=16,
     ).to(device=device, dtype=dtype)
     return model

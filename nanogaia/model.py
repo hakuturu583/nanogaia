@@ -358,10 +358,10 @@ class VideoARTCoreCV8x8x8(nn.Module):
         t_in_latent: int = 16,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
-        d_model: int = 512,
-        num_layers: int = 8,
-        num_heads: int = 8,
-        dim_feedforward: int = 2048,
+        d_model: int = 256,
+        num_layers: int = 4,
+        num_heads: int = 4,
+        dim_feedforward: int = 1024,
         t_future_latent: int | None = None,
     ):
         super().__init__()
@@ -468,10 +468,10 @@ class CosmosVideoARModel(nn.Module):
         t_in_latent: int = 16,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
-        d_model: int = 512,
-        num_layers: int = 8,
-        num_heads: int = 8,
-        dim_feedforward: int = 2048,
+        d_model: int = 256,
+        num_layers: int = 4,
+        num_heads: int = 4,
+        dim_feedforward: int = 1024,
         t_future_latent: int | None = None,
     ):
         super().__init__()
