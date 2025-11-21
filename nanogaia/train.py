@@ -1,5 +1,7 @@
 import argparse
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Tuple
 
@@ -7,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import cv2
 
 from nanogaia.comma2k19_dataset import CommaDataset, ToTensor
 from nanogaia.model import CosmosVideoARModel, CosmosVideoTokenizer
@@ -100,11 +103,66 @@ def build_model(device: torch.device, dtype: torch.dtype) -> CosmosVideoARModel:
     return model
 
 
+def to_uint8_video(frames: torch.Tensor) -> np.ndarray:
+    """
+    frames: (T, C, H, W) in [-1, 1]
+    returns: (T, H, W, 3) uint8 RGB
+    """
+    frames = torch.clamp(frames, -1.0, 1.0)
+    frames = (frames + 1.0) * 127.5
+    frames = frames.permute(0, 2, 3, 1).cpu().numpy().astype(np.uint8)
+    return frames
+
+
+def save_video(pred: torch.Tensor, target: torch.Tensor, fps: int = 4) -> str:
+    """
+    pred/target: (1, C, T, H, W)
+    Writes an mp4 stacking pred|target per frame. Returns file path.
+    """
+    pred = pred[0].permute(1, 0, 2, 3)  # (T, C, H, W)
+    target = target[0].permute(1, 0, 2, 3)
+    pred_np = to_uint8_video(pred)
+    target_np = to_uint8_video(target)
+
+    T, H, W, _ = pred_np.shape
+    frames = []
+    for t in range(T):
+        pred_frame = cv2.cvtColor(pred_np[t], cv2.COLOR_RGB2BGR)
+        tgt_frame = cv2.cvtColor(target_np[t], cv2.COLOR_RGB2BGR)
+        frames.append(np.concatenate([pred_frame, tgt_frame], axis=1))
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    writer = cv2.VideoWriter(
+        path, fourcc, fps, (frames[0].shape[1], frames[0].shape[0])
+    )
+    for frame in frames:
+        writer.write(frame)
+    writer.release()
+    return path
+
+
 def train(args: argparse.Namespace) -> None:
     device = torch.device(
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
     dtype = torch.float16 if device.type == "cuda" else torch.float32
+
+    use_wandb = not args.disable_wandb
+    wandb_run = None
+    if use_wandb:
+        try:
+            import wandb
+        except ImportError as exc:
+            raise ImportError(
+                "wandb is required for logging; install with `pip install wandb` or pass --disable-wandb."
+            ) from exc
+        wandb_run = wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name or None,
+            config=vars(args),
+        )
 
     dataloader = make_dataloader(
         Path(args.dataset_root), args.batch_size, args.num_workers
@@ -137,11 +195,44 @@ def train(args: argparse.Namespace) -> None:
                     f"epoch {epoch} step {global_step} "
                     f"loss {loss.item():.4f} device {device} dtype {dtype}"
                 )
+                if use_wandb:
+                    wandb.log(
+                        {
+                            "train/loss": loss.item(),
+                            "train/epoch": epoch,
+                        },
+                        step=global_step,
+                    )
+
+            if (
+                use_wandb
+                and args.video_interval > 0
+                and global_step > 0
+                and global_step % args.video_interval == 0
+            ):
+                with torch.no_grad():
+                    video_path = save_video(
+                        pred_future.detach(), target.detach(), fps=args.video_fps
+                    )
+                wandb.log(
+                    {
+                        "train/sample_video": wandb.Video(
+                            video_path, fps=args.video_fps, caption="pred | target"
+                        )
+                    },
+                    step=global_step,
+                )
+                os.remove(video_path)
 
             global_step += 1
             if args.max_steps and global_step >= args.max_steps:
                 print("Reached max_steps, stopping training loop.")
+                if wandb_run:
+                    wandb_run.finish()
                 return
+
+    if wandb_run:
+        wandb_run.finish()
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,10 +252,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument(
+        "--video-interval",
+        type=int,
+        default=200,
+        help="Global step interval to log mp4 to wandb.",
+    )
+    parser.add_argument(
+        "--video-fps", type=int, default=4, help="FPS for logged videos."
+    )
+    parser.add_argument(
         "--max-steps", type=int, default=0, help="0 disables early stop."
     )
     parser.add_argument(
         "--device", type=str, default=None, help="Override device e.g. cuda:0 or cpu"
+    )
+    parser.add_argument("--wandb-project", type=str, default="nanogaia")
+    parser.add_argument("--wandb-run-name", type=str, default=None)
+    parser.add_argument(
+        "--disable-wandb",
+        action="store_true",
+        help="Disable wandb logging (metrics and videos).",
     )
     return parser.parse_args()
 
