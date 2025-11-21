@@ -60,7 +60,9 @@ def make_dataloader(
     )
 
 
-def prepare_batch(batch: dict, device: torch.device) -> Tuple[torch.Tensor, ...]:
+def prepare_batch(
+    batch: dict, device: torch.device, dtype: torch.dtype
+) -> Tuple[torch.Tensor, ...]:
     """
     Returns:
         video_past:    (B, 3, 16, H, W)
@@ -77,10 +79,10 @@ def prepare_batch(batch: dict, device: torch.device) -> Tuple[torch.Tensor, ...]
 
     actions = compute_action_deltas(orientations, positions).float()  # (B, 32, 3)
 
-    video_past = frames[:, :, :16].to(device)
-    video_future = frames[:, :, 16:32].to(device)
-    actions_past = actions[:, :16].to(device)
-    actions_future = actions[:, 16:32].to(device)
+    video_past = frames[:, :, :16].to(device=device, dtype=dtype)
+    video_future = frames[:, :, 16:32].to(device=device, dtype=dtype)
+    actions_past = actions[:, :16].to(device=device, dtype=dtype)
+    actions_future = actions[:, 16:32].to(device=device, dtype=dtype)
     return video_past, video_future, actions_past, actions_future
 
 
@@ -183,7 +185,7 @@ def train(args: argparse.Namespace) -> None:
     for epoch in range(args.epochs):
         for batch in dataloader:
             video_past, video_future, actions_past, actions_future = prepare_batch(
-                batch, device
+                batch, device, dtype
             )
 
             optimizer.zero_grad(set_to_none=True)
