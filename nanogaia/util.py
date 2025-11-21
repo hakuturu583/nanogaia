@@ -1,12 +1,24 @@
-"""Utility helpers for working with Comma2k19 pose data."""
+"""Utility helpers for pose math."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 
 VectorLike = Sequence[float] | np.ndarray
+
+
+@dataclass(frozen=True)
+class EcefVector:
+    """Represents a vector anchored at an origin with an associated orientation."""
+
+    origin: np.ndarray
+    orientation: np.ndarray
+    # XYZ components in the local frame defined by origin + orientation
+    # Coordinates are forward, right, down
+    components: np.ndarray
 
 
 def _as_vec3(vector: VectorLike, name: str) -> np.ndarray:
@@ -27,8 +39,6 @@ def _as_quaternion(quaternion: Sequence[float] | np.ndarray) -> np.ndarray:
 
 
 def _quaternion_to_rotation_matrix(quaternion: np.ndarray) -> np.ndarray:
-    """Return the rotation matrix for a quaternion with [w, x, y, z] order."""
-
     w, x, y, z = quaternion
     return np.array(
         [
@@ -40,26 +50,26 @@ def _quaternion_to_rotation_matrix(quaternion: np.ndarray) -> np.ndarray:
     )
 
 
-def relative_position_from_previous_pose(
-    prev_position: VectorLike,
-    prev_orientation: Sequence[float] | np.ndarray,
-    next_position: VectorLike,
-) -> np.ndarray:
-    """Express the next pose's position in the coordinate frame of the previous pose.
+def ecef_vector_from_pose(
+    origin_position: VectorLike,
+    origin_orientation: Sequence[float] | np.ndarray,
+    target_position: VectorLike,
+) -> EcefVector:
+    """Return the vector from origin -> target relative to the origin pose.
 
-    The dataset stores global positions in the ECEF frame and quaternions in the
-    ``[w, x, y, z]`` order.  This helper computes the translation to the next pose
-    and rotates it into the previous pose's coordinate frame so that the caller can
-    reason in a local, car-centric space.
+    The origin pose defines the coordinate frame (via its quaternion).  The returned
+    vector stores the original inputs as well as the translation expressed in the
+    origin-centric local frame.
     """
 
-    prev_pos = _as_vec3(prev_position, "prev_position")
-    next_pos = _as_vec3(next_position, "next_position")
-    quat = _as_quaternion(prev_orientation)
+    origin = _as_vec3(origin_position, "origin_position")
+    target = _as_vec3(target_position, "target_position")
+    orientation = _as_quaternion(origin_orientation)
 
-    delta_global = next_pos - prev_pos
-    rotation = _quaternion_to_rotation_matrix(quat)
-    return rotation.T @ delta_global
+    delta = target - origin
+    rotation = _quaternion_to_rotation_matrix(orientation)
+    components = rotation.T @ delta
+    return EcefVector(origin=origin, orientation=orientation, components=components)
 
 
-__all__ = ["relative_position_from_previous_pose"]
+__all__ = ["EcefVector", "ecef_vector_from_pose"]
