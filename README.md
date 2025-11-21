@@ -7,7 +7,7 @@ uv sync --extra cu124
 
 ## Training
 
-The training script consumes 32-frame windows from `dataset/Chunk_*` sequences, uses the first 16 frames (+ pose deltas) as input, and predicts the next 16 frames conditioned on future pose deltas via cross-attention.
+The training script consumes 16-frame windows from `dataset/Chunk_*` sequences, uses the first 8 frames (+ pose deltas) as input, and predicts the next 8 frames conditioned on the next 8 pose deltas via cross-attention.
 
 Basic run (logs to Weights & Biases by default):
 

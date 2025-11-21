@@ -49,7 +49,7 @@ def compute_action_deltas(
 def make_dataloader(
     dataset_root: Path, batch_size: int, num_workers: int
 ) -> DataLoader:
-    dataset = CommaDataset(dataset_root, window_size=32, transform=ToTensor())
+    dataset = CommaDataset(dataset_root, window_size=16, transform=ToTensor())
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -65,24 +65,24 @@ def prepare_batch(
 ) -> Tuple[torch.Tensor, ...]:
     """
     Returns:
-        video_past:    (B, 3, 16, H, W)
-        video_future:  (B, 3, 16, H, W)
-        actions_past:  (B, 16, 3)
-        actions_future:(B, 16, 3)
+        video_past:    (B, 3, 8, H, W)
+        video_future:  (B, 3, 8, H, W)
+        actions_past:  (B, 8, 3)
+        actions_future:(B, 8, 3)
     """
-    frames = batch["image"].float()  # (B, 32, H, W, 3)
-    frames = frames.permute(0, 4, 1, 2, 3)  # (B, 3, 32, H, W)
+    frames = batch["image"].float()  # (B, 16, H, W, 3)
+    frames = frames.permute(0, 4, 1, 2, 3)  # (B, 3, 16, H, W)
     frames = frames / 127.5 - 1.0  # normalize to [-1, 1]
 
     orientations = batch["orientations"].float()
     positions = batch["positions"].float()
 
-    actions = compute_action_deltas(orientations, positions).float()  # (B, 32, 3)
+    actions = compute_action_deltas(orientations, positions).float()  # (B, 16, 3)
 
-    video_past = frames[:, :, :16].to(device=device, dtype=dtype)
-    video_future = frames[:, :, 16:32].to(device=device, dtype=dtype)
-    actions_past = actions[:, :16].to(device=device, dtype=dtype)
-    actions_future = actions[:, 16:32].to(device=device, dtype=dtype)
+    video_past = frames[:, :, :8].to(device=device, dtype=dtype)
+    video_future = frames[:, :, 8:16].to(device=device, dtype=dtype)
+    actions_past = actions[:, :8].to(device=device, dtype=dtype)
+    actions_future = actions[:, 8:16].to(device=device, dtype=dtype)
     return video_past, video_future, actions_past, actions_future
 
 
@@ -93,14 +93,14 @@ def build_model(device: torch.device, dtype: torch.dtype) -> CosmosVideoARModel:
     )
     model = CosmosVideoARModel(
         tokenizer=tokenizer,
-        t_in_latent=16,
+        t_in_latent=1,
         frames_per_latent=8,
         action_dim_raw=3,
         d_model=256,
         num_layers=4,
         num_heads=4,
         dim_feedforward=1024,
-        t_future_latent=16,
+        t_future_latent=1,
     ).to(device=device, dtype=dtype)
     return model
 

@@ -355,7 +355,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 16,
+        t_in_latent: int = 1,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 256,
@@ -423,7 +423,12 @@ class VideoARTCoreCV8x8x8(nn.Module):
             z_future_pred: (B, C_lat, 1, H, W)  # 1 latent time step
         """
         B, T, C, H, W = z_past.shape
-        assert T == self.t_in_latent
+        # t_in_latent is the expected latent time steps; we keep a safety check but prefer matching the actual tensor
+        if T != self.t_in_latent:
+            raise ValueError(
+                f"Expected latent T={self.t_in_latent}, got {T}. "
+                "Ensure frames_per_latent and t_in_latent align with tokenizer compression."
+            )
 
         if actions_future is None:
             raise ValueError(
@@ -447,7 +452,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
         # 7) tokens → latent (T_out = 16)
-        z_future = self.flattener.tokens_to_latent(h_latent, t_out=16)
+        z_future = self.flattener.tokens_to_latent(h_latent, t_out=self.t_future_latent)
         # z_future: (B, C_lat, 1, H, W)
         return z_future
 
@@ -465,7 +470,7 @@ class CosmosVideoARModel(nn.Module):
         c_latent: int = 3,
         h_latent: int = 30,
         w_latent: int = 40,
-        t_in_latent: int = 16,
+        t_in_latent: int = 1,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
         d_model: int = 256,
