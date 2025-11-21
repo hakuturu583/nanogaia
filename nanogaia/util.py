@@ -38,6 +38,23 @@ def _as_quaternion(quaternion: Sequence[float] | np.ndarray) -> np.ndarray:
     return arr / norm
 
 
+def _quaternion_conjugate(quaternion: np.ndarray) -> np.ndarray:
+    return np.array([quaternion[0], -quaternion[1], -quaternion[2], -quaternion[3]])
+
+
+def _quaternion_multiply(lhs: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    w1, x1, y1, z1 = lhs
+    w2, x2, y2, z2 = rhs
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
+
+
 def _quaternion_to_rotation_matrix(quaternion: np.ndarray) -> np.ndarray:
     w, x, y, z = quaternion
     return np.array(
@@ -72,4 +89,31 @@ def ecef_vector_from_pose(
     return EcefVector(origin=origin, orientation=orientation, components=components)
 
 
-__all__ = ["EcefVector", "ecef_vector_from_pose"]
+def quaternion_difference(
+    prev_orientation: Sequence[float] | np.ndarray,
+    next_orientation: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """Return the quaternion rotating from prev -> next in [w, x, y, z] order."""
+
+    prev_quat = _as_quaternion(prev_orientation)
+    next_quat = _as_quaternion(next_orientation)
+    delta = _quaternion_multiply(next_quat, _quaternion_conjugate(prev_quat))
+    return delta / np.linalg.norm(delta)
+
+
+def quaternion_to_yaw(quaternion: Sequence[float] | np.ndarray) -> float:
+    """Compute the yaw (rotation around Z) from a quaternion in radians."""
+
+    quat = _as_quaternion(quaternion)
+    w, x, y, z = quat
+    siny_cosp = 2 * (w * z + x * y)
+    cosy_cosp = 1 - 2 * (y * y + z * z)
+    return float(np.arctan2(siny_cosp, cosy_cosp))
+
+
+__all__ = [
+    "EcefVector",
+    "ecef_vector_from_pose",
+    "quaternion_difference",
+    "quaternion_to_yaw",
+]

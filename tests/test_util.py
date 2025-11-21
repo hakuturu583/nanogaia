@@ -1,7 +1,11 @@
 import numpy as np
-
-from nanogaia.util import ecef_vector_from_pose
 import pytest
+
+from nanogaia.util import (
+    ecef_vector_from_pose,
+    quaternion_difference,
+    quaternion_to_yaw,
+)
 
 
 def test_ecef_vector_components_match_difference_for_identity_orientation():
@@ -47,3 +51,37 @@ def test_eccf_to_local_coordinate():
     assert vector[0] == pytest.approx(1.69195453)
     assert vector[1] == pytest.approx(0.01441992)
     assert vector[2] == pytest.approx(-0.07211311)
+
+
+def test_quaternion_difference_identity_if_orientations_match():
+    orientation = np.array([0.5, 0.5, 0.5, 0.5])
+
+    delta = quaternion_difference(orientation, orientation)
+
+    np.testing.assert_allclose(delta, np.array([1.0, 0.0, 0.0, 0.0]))
+
+
+def test_quaternion_difference_returns_expected_rotation():
+    prev = np.array([np.sqrt(2) / 2, 0.0, 0.0, np.sqrt(2) / 2])
+    next_q = np.array([1.0, 0.0, 0.0, 0.0])
+
+    delta = quaternion_difference(prev, next_q)
+
+    expected = np.array([np.sqrt(2) / 2, 0.0, 0.0, -np.sqrt(2) / 2])
+    np.testing.assert_allclose(delta, expected, atol=1e-6)
+
+
+def test_quaternion_to_yaw_extracts_rotation_about_z():
+    quat = np.array([np.sqrt(2) / 2, 0.0, 0.0, np.sqrt(2) / 2])
+
+    yaw = quaternion_to_yaw(quat)
+
+    assert yaw == pytest.approx(np.pi / 2)
+
+
+def test_quaternion_to_yaw_zero_for_identity():
+    quat = np.array([1.0, 0.0, 0.0, 0.0])
+
+    yaw = quaternion_to_yaw(quat)
+
+    assert yaw == pytest.approx(0.0)
