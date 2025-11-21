@@ -158,9 +158,14 @@ def train(args: argparse.Namespace) -> None:
             raise ImportError(
                 "wandb is required for logging; install with `pip install wandb` or pass --disable-wandb."
             ) from exc
+        default_run_name = args.wandb_run_name
+        if default_run_name is None:
+            from datetime import datetime, timezone
+
+            default_run_name = datetime.now(timezone.utc).isoformat()
         wandb_run = wandb.init(
             project=args.wandb_project,
-            name=args.wandb_run_name or None,
+            name=default_run_name,
             config=vars(args),
         )
 
