@@ -266,12 +266,20 @@ class FlashDecoderLayer(nn.Module):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
 
         self.self_attn = FlashMHA(
             embed_dim=d_model,
             num_heads=n_heads,
             dropout=dropout,
             causal=True,  # prevents attending to future tokens
+        )
+        self.cross_attn = FlashMHA(
+            embed_dim=d_model,
+            num_heads=n_heads,
+            dropout=dropout,
+            cross_attn=True,
+            causal=False,
         )
 
         self.ffn = nn.Sequential(
@@ -281,12 +289,19 @@ class FlashDecoderLayer(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, cross_kv: torch.Tensor | None = None
+    ) -> torch.Tensor:
         h = self.norm1(x)
         h = self.self_attn(h)
         x = x + h
 
-        h = self.norm2(x)
+        if cross_kv is not None:
+            h = self.norm2(x)
+            h = self.cross_attn(h, x_kv=cross_kv)
+            x = x + h
+
+        h = self.norm3(x)
         h = self.ffn(h)
         x = x + h
 
@@ -315,9 +330,11 @@ class FlashDecoder(nn.Module):
         )
         self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, cross_kv: torch.Tensor | None = None
+    ) -> torch.Tensor:
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, cross_kv)
         return self.norm(x)
 
 
@@ -345,10 +362,12 @@ class VideoARTCoreCV8x8x8(nn.Module):
         num_layers: int = 8,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
+        t_future_latent: int | None = None,
     ):
         super().__init__()
         self.t_in_latent = t_in_latent
         self.frames_per_latent = frames_per_latent
+        self.t_future_latent = t_future_latent or t_in_latent
 
         self.flattener = LatentFlattener(
             c_latent=c_latent,
@@ -361,6 +380,13 @@ class VideoARTCoreCV8x8x8(nn.Module):
             group_size=frames_per_latent,
             d_model=d_model,
             t_latent=t_in_latent,
+        )
+
+        self.action_future_emb = ActionEmbedding(
+            action_dim_raw=action_dim_raw,
+            group_size=frames_per_latent,
+            d_model=d_model,
+            t_latent=self.t_future_latent,
         )
 
         self.fuser = TokenFuser(
@@ -381,11 +407,17 @@ class VideoARTCoreCV8x8x8(nn.Module):
         # Transformer hidden (d_model) → VAE latent channel (C_lat)
         self.to_latent_tok = nn.Linear(d_model, self.flattener.c_tok)
 
-    def forward(self, z_past: torch.Tensor, actions_past: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        z_past: torch.Tensor,
+        actions_past: torch.Tensor,
+        actions_future: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         Args:
-            z_past:       (B, T_in, C_in, H, W)
-            actions_past: (B, F_in, D_action_raw)
+            z_past:          (B, T_in, C_in, H, W)
+            actions_past:    (B, F_in, D_action_raw)
+            actions_future:  (B, F_out, D_action_raw)
 
         Returns:
             z_future_pred: (B, C_lat, 1, H, W)  # 1 latent time step
@@ -393,17 +425,23 @@ class VideoARTCoreCV8x8x8(nn.Module):
         B, T, C, H, W = z_past.shape
         assert T == self.t_in_latent
 
+        if actions_future is None:
+            raise ValueError(
+                "actions_future is required for cross-attention conditioning."
+            )
+
         # 1) latent → tokens
         z_tokens = self.flattener.latent_to_tokens(z_past)  # (B, N=T*H*W, C_tok)
 
         # 2) actions → (B, T, d_model)
         a_emb = self.action_emb(actions_past)  # (B, T, d_model)
+        a_future_emb = self.action_future_emb(actions_future)  # (B, T_future, d_model)
 
         # 3) fuse video tokens + action embeddings
         tok = self.fuser(z_tokens, a_emb)  # (B, N, d_model)
 
         # 4) Transformer decoder
-        h = self.decoder(tok)  # (B, N, d_model)
+        h = self.decoder(tok, a_future_emb)  # (B, N, d_model)
 
         # 5) project back to latent channel dim
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
@@ -434,6 +472,7 @@ class CosmosVideoARModel(nn.Module):
         num_layers: int = 8,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
+        t_future_latent: int | None = None,
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -448,15 +487,20 @@ class CosmosVideoARModel(nn.Module):
             num_layers=num_layers,
             num_heads=num_heads,
             dim_feedforward=dim_feedforward,
+            t_future_latent=t_future_latent,
         )
 
     def forward(
-        self, video_past: torch.Tensor, actions_past: torch.Tensor
+        self,
+        video_past: torch.Tensor,
+        actions_past: torch.Tensor,
+        actions_future: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
             video_past:   (B, C, T_in, H, W)
             actions_past: (B, T_in, D_action_raw)  # per-frame actions, aligned with T_in
+            actions_future: (B, T_out, D_action_raw)
 
         Returns:
             video_future_pred: (B, C, T_out, H, W)
@@ -465,7 +509,7 @@ class CosmosVideoARModel(nn.Module):
         z_past = self.tokenizer.encode(video_past)
 
         # latent AR (uses frame-level actions)
-        z_future = self.core(z_past, actions_past)
+        z_future = self.core(z_past, actions_past, actions_future)
 
         # back to video (B, C, T_out, H, W)
         video_future = self.tokenizer.decode(z_future)
@@ -514,10 +558,11 @@ if __name__ == "__main__":
 
     # per-frame actions: (B, T_in, D)
     actions_past = torch.randn(B, T_in, D_action_raw).to(device=device, dtype=dtype)
+    actions_future = torch.randn(B, T_in, D_action_raw).to(device=device, dtype=dtype)
 
     with torch.no_grad():
         z_past = tokenizer.encode(video_past)
-        video_future_pred = model(video_past, actions_past)
+        video_future_pred = model(video_past, actions_past, actions_future)
         video_future_pred = video_future_pred[
             :, :, :T_in, :, :
         ]  # take first T_in frames
