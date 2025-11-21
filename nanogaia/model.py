@@ -202,8 +202,8 @@ class LatentFlattener(nn.Module):
         assert C == self.c_latent
         assert N == t_out * H * W
 
-        z = tokens.view(B, t_out, H, W, C)          # (B, T, H, W, C)
-        z = z.permute(0, 1, 4, 2, 3)               # (B, T, C, H, W)
+        z = tokens.view(B, t_out, H, W, C)  # (B, T, H, W, C)
+        z = z.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
         print("z shape:", z.shape)  # --- IGNORE ---
         return z
 
@@ -518,7 +518,9 @@ if __name__ == "__main__":
     with torch.no_grad():
         z_past = tokenizer.encode(video_past)
         video_future_pred = model(video_past, actions_past)
-        video_future_pred = video_future_pred[:, :, :T_in, :, :]  # take first T_in frames
+        video_future_pred = video_future_pred[
+            :, :, :T_in, :, :
+        ]  # take first T_in frames
 
     print("video_past shape:", video_past.shape)
     print("video_future_pred shape:", video_future_pred.shape)
