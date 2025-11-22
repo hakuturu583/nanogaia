@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import io
 from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,6 +141,91 @@ class CommaDataset(Dataset):
             sample = self.transform(sample)
 
         return sample
+
+    def export_as_latent_data(
+        self,
+        lmdb_path: str | os.PathLike,
+        map_size: int | None = None,
+        commit_interval: int = 512,
+    ) -> None:
+        """
+        Export 16-frame windows into an LMDB with 8-frame past/future video and actions.
+
+        Each record stores:
+            video_past:   (8, H, W, 3) uint8
+            video_future: (8, H, W, 3) uint8
+            actions_past: (8, 3) float32
+            actions_future:(8, 3) float32
+        """
+        import lmdb
+
+        if self.window_size != 16:
+            raise ValueError(
+                f"export_as_latent_data requires window_size=16, got {self.window_size}"
+            )
+
+        lmdb_path = Path(lmdb_path)
+        lmdb_path.parent.mkdir(parents=True, exist_ok=True)
+
+        sample = self[0]
+        frames = sample["image"]
+        bytes_per_sample = (
+            frames.size * np.dtype(np.uint8).itemsize
+            + frames.shape[0] * 3 * np.dtype(np.float32).itemsize
+        )
+        if map_size is None:
+            map_size = max(int(bytes_per_sample * len(self) * 1.1), 1 << 30)
+
+        env = lmdb.open(
+            str(lmdb_path),
+            map_size=map_size,
+            subdir=True,
+            lock=True,
+            readahead=False,
+            writemap=True,
+        )
+        with env.begin(write=True) as txn:
+            txn.put(b"length", str(len(self)).encode("utf-8"))
+
+        txn = env.begin(write=True)
+        for idx in range(len(self)):
+            sample = self[idx]
+            frames = sample["image"].astype(np.uint8)
+            orientations = np.asarray(sample["orientations"])
+            positions = np.asarray(sample["positions"])
+
+            actions: List[np.ndarray] = []
+            for t in range(frames.shape[0]):
+                if t + 1 < frames.shape[0]:
+                    delta = self._get_diff_2d_pose(
+                        orientations[t],
+                        positions[t],
+                        orientations[t + 1],
+                        positions[t + 1],
+                    )
+                else:
+                    delta = np.zeros(3, dtype=np.float64)
+                actions.append(delta)
+
+            actions_np = np.stack(actions, axis=0).astype(np.float32)
+            payload = {
+                "video_past": frames[:8],
+                "video_future": frames[8:],
+                "actions_past": actions_np[:8],
+                "actions_future": actions_np[8:],
+            }
+
+            buffer = io.BytesIO()
+            np.savez_compressed(buffer, **payload)
+            key = f"{idx:08d}".encode("utf-8")
+            txn.put(key, buffer.getvalue())
+
+            if (idx + 1) % commit_interval == 0:
+                txn.commit()
+                txn = env.begin(write=True)
+
+        txn.commit()
+        env.sync()
 
     def _resolve_indices(self, index: int) -> Tuple[int, int]:
         sequence_idx = bisect_right(self.sequence_offsets, index)
