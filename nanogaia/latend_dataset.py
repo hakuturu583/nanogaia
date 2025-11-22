@@ -14,10 +14,10 @@ class LatentDataset(Dataset):
     LMDB-backed dataset produced by CommaDataset.export_as_latent_data.
 
     Each record contains:
-        video_past:   (8, H, W, 3) uint8
-        video_future: (8, H, W, 3) uint8
-        actions_past: (8, 3) float32
-        actions_future:(8, 3) float32
+        latent_past:    (C_lat, T_lat, H_lat, W_lat) float16
+        latent_future:  (C_lat, T_lat, H_lat, W_lat) float16
+        actions_past:   (8, 3) float32
+        actions_future: (8, 3) float32
     """
 
     def __init__(
@@ -57,8 +57,8 @@ class LatentDataset(Dataset):
         with io.BytesIO(raw) as buffer:
             npz = np.load(buffer)
             sample: Dict[str, np.ndarray] = {
-                "video_past": npz["video_past"],
-                "video_future": npz["video_future"],
+                "latent_past": npz["latent_past"],
+                "latent_future": npz["latent_future"],
                 "actions_past": npz["actions_past"],
                 "actions_future": npz["actions_future"],
             }

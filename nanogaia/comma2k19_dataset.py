@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from nanogaia.model import CosmosVideoTokenizer
 from nanogaia.util import (
     ecef_vector_from_pose,
     quaternion_difference,
@@ -147,15 +148,18 @@ class CommaDataset(Dataset):
         lmdb_path: str | os.PathLike,
         map_size: int | None = None,
         commit_interval: int = 512,
+        tokenizer: CosmosVideoTokenizer | None = None,
+        device: str | torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         """
-        Export 16-frame windows into an LMDB with 8-frame past/future video and actions.
+        Export 16-frame windows into an LMDB with 8-frame past/future latents and actions.
 
         Each record stores:
-            video_past:   (8, H, W, 3) uint8
-            video_future: (8, H, W, 3) uint8
-            actions_past: (8, 3) float32
-            actions_future:(8, 3) float32
+            latent_past:    (C_lat, T_lat, H_lat, W_lat) float16
+            latent_future:  (C_lat, T_lat, H_lat, W_lat) float16
+            actions_past:   (8, 3) float32
+            actions_future: (8, 3) float32
         """
         import lmdb
 
@@ -164,13 +168,23 @@ class CommaDataset(Dataset):
                 f"export_as_latent_data requires window_size=16, got {self.window_size}"
             )
 
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if dtype is None:
+            dtype = torch.float16 if str(device) == "cuda" else torch.float32
+        if tokenizer is None:
+            tokenizer = CosmosVideoTokenizer(device=str(device), dtype=dtype)
+
         lmdb_path = Path(lmdb_path)
         lmdb_path.parent.mkdir(parents=True, exist_ok=True)
 
         sample = self[0]
-        frames = sample["image"]
+        frames = sample["image"].astype(np.float32)
+        latents_past_sample, latents_future_sample = self._encode_latents(
+            frames, tokenizer
+        )
         bytes_per_sample = (
-            frames.size * np.dtype(np.uint8).itemsize
+            latents_past_sample.size * np.dtype(np.float16).itemsize
+            + latents_future_sample.size * np.dtype(np.float16).itemsize
             + frames.shape[0] * 3 * np.dtype(np.float32).itemsize
         )
         if map_size is None:
@@ -190,7 +204,7 @@ class CommaDataset(Dataset):
         txn = env.begin(write=True)
         for idx in range(len(self)):
             sample = self[idx]
-            frames = sample["image"].astype(np.uint8)
+            frames = sample["image"].astype(np.float32)
             orientations = np.asarray(sample["orientations"])
             positions = np.asarray(sample["positions"])
 
@@ -208,9 +222,10 @@ class CommaDataset(Dataset):
                 actions.append(delta)
 
             actions_np = np.stack(actions, axis=0).astype(np.float32)
+            latents_past, latents_future = self._encode_latents(frames, tokenizer)
             payload = {
-                "video_past": frames[:8],
-                "video_future": frames[8:],
+                "latent_past": latents_past,
+                "latent_future": latents_future,
                 "actions_past": actions_np[:8],
                 "actions_future": actions_np[8:],
             }
@@ -226,6 +241,24 @@ class CommaDataset(Dataset):
 
         txn.commit()
         env.sync()
+
+    def _encode_latents(
+        self, frames: np.ndarray, tokenizer: CosmosVideoTokenizer
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Convert 16-frame RGB uint8/float32 (T, H, W, 3) into past/future latents.
+        """
+        video = torch.from_numpy(frames).permute(0, 3, 1, 2)  # (T, C, H, W)
+        video = (video / 127.5) - 1.0  # normalize to [-1, 1]
+
+        video_past = video[:8].unsqueeze(0)  # (1, C, T, H, W)
+        video_future = video[8:16].unsqueeze(0)
+
+        latents_past = tokenizer.encode(video_past).cpu().numpy().astype(np.float16)[0]
+        latents_future = (
+            tokenizer.encode(video_future).cpu().numpy().astype(np.float16)[0]
+        )
+        return latents_past, latents_future
 
     def _resolve_indices(self, index: int) -> Tuple[int, int]:
         sequence_idx = bisect_right(self.sequence_offsets, index)
