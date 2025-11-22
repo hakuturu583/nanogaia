@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from nanogaia.model import CosmosVideoTokenizer
 from nanogaia.util import (
@@ -200,7 +201,7 @@ class CommaDataset(Dataset):
             txn.put(b"length", str(len(self)).encode("utf-8"))
 
         txn = env.begin(write=True)
-        for idx in range(len(self)):
+        for idx in tqdm(range(len(self)), desc="export_as_latent_data"):
             sample = self[idx]
             frames = sample["image"].astype(np.float32)
             orientations = np.asarray(sample["orientations"])
