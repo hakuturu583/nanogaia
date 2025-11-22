@@ -9,11 +9,13 @@
 
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
-import os
-import zipfile
 import argparse
 import cv2
+import os
+import zipfile
 from pathlib import Path
+
+from nanogaia.comma2k19_dataset import CommaDataset
 
 
 def convert_hevc_to_jpeg_sequence(
@@ -138,9 +140,21 @@ def prepare_dataset(chunk_number: int):
     unzip_skip_existing(copy_from, copy_to)
 
 
+def export_latent_lmdb(dataset_dir: Path, lmdb_name: str = "latent.lmdb") -> None:
+    """
+    Build LMDB containing 8-frame past/future video and actions from the prepared dataset.
+    """
+    dataset = CommaDataset(dataset_dir, window_size=16)
+    lmdb_path = dataset_dir / lmdb_name
+    dataset.export_as_latent_data(lmdb_path)
+    print(f"Wrote latent LMDB to: {lmdb_path}")
+
+
 def main():
     for i in range(1, 11):
         prepare_dataset(i)
+    dataset_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "dataset"
+    export_latent_lmdb(dataset_dir)
 
 
 if __name__ == "__main__":
