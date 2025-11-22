@@ -179,20 +179,18 @@ class CommaDataset(Dataset):
 
         sample = self[0]
         frames = sample["image"].astype(np.float32)
-        latents_past_sample, latents_future_sample = self._encode_latents(
-            frames, tokenizer
-        )
-        bytes_per_sample = (
-            latents_past_sample.size * np.dtype(np.float16).itemsize
-            + latents_future_sample.size * np.dtype(np.float16).itemsize
-            + frames.shape[0] * 3 * np.dtype(np.float32).itemsize
-        )
-        if map_size is None:
-            map_size = max(int(bytes_per_sample * len(self) * 1.1), 1 << 30)
+        # latents_past_sample, latents_future_sample = self._encode_latents(
+        #     frames, tokenizer
+        # )
+        # bytes_per_sample = (
+        #     latents_past_sample.size * np.dtype(np.float16).itemsize
+        #     + latents_future_sample.size * np.dtype(np.float16).itemsize
+        #     + frames.shape[0] * 3 * np.dtype(np.float32).itemsize
+        # )
 
         env = lmdb.open(
             str(lmdb_path),
-            map_size=map_size,
+            map_size=100 * 1024 * 1024 * 1024,
             subdir=True,
             lock=True,
             readahead=False,
@@ -248,11 +246,10 @@ class CommaDataset(Dataset):
         """
         Convert 16-frame RGB uint8/float32 (T, H, W, 3) into past/future latents.
         """
-        video = torch.from_numpy(frames).permute(0, 3, 1, 2)  # (T, C, H, W)
-        video = (video / 127.5) - 1.0  # normalize to [-1, 1]
+        video = torch.from_numpy(frames).permute(3, 0, 1, 2)  # (C, T, H, W)
+        video = video.unsqueeze(0).to(tokenizer.device)  # (1, C, T, H, W)
 
-        video_past = video[:8].unsqueeze(0)  # (1, C, T, H, W)
-        video_future = video[8:16].unsqueeze(0)
+        video_past, video_future = torch.split(video, 8, dim=2)  # (C, 8, H, W)
 
         latents_past = tokenizer.encode(video_past).cpu().numpy().astype(np.float16)[0]
         latents_future = (
