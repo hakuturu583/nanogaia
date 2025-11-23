@@ -7,21 +7,14 @@ uv sync --extra cu124
 
 ## Training
 
-The training script consumes 16-frame windows from `dataset/Chunk_*` sequences, uses the first 8 frames (+ pose deltas) as input, and predicts the next 8 frames conditioned on the next 8 pose deltas via cross-attention.
-
-Basic run (logs to Weights & Biases by default):
+The training script now consumes pre-encoded latent windows from an LMDB (see `nanogaia/train.yaml` for defaults). Specify a YAML config explicitly and start training:
 
 ```
-python -m nanogaia.train \
-  --dataset-root /absolute/path/to/dataset \
-  --batch-size 1 \
-  --epochs 1 \
-  --wandb-project nanogaia \
-  --wandb-run-name exp1
+python -m nanogaia.train --config nanogaia/train.yaml
 ```
 
 Artifacts:
-- Metrics: `train/loss`, `train/epoch` every `--log-interval`.
-- Videos: side-by-side `pred | target` mp4 logged every `--video-interval` steps.
+- Metrics: `train/loss`, `train/epoch` every `log_interval` (YAML).
+- Videos: side-by-side `pred | target` mp4 logged every `video_interval` steps if wandb is enabled.
 
 To disable W&B entirely (no metrics or videos): add `--disable-wandb`.
