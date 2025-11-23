@@ -37,6 +37,22 @@ class WandbConfig:
 
 
 @dataclass
+class NetworkConfig:
+    d_model: int = 128
+    num_layers: int = 2
+    num_heads: int = 2
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "NetworkConfig":
+        base = cls()
+        return cls(
+            d_model=int(data.get("d_model", base.d_model)),
+            num_layers=int(data.get("num_layers", base.num_layers)),
+            num_heads=int(data.get("num_heads", base.num_heads)),
+        )
+
+
+@dataclass
 class TrainConfig:
     lmdb_path: Path = Path(__file__).resolve().parent / "dataset" / "latent.lmdb"
     batch_size: int = 1
@@ -53,6 +69,7 @@ class TrainConfig:
     loss_mae_weight: float = 0.2
     loss_scale: float = 1.0
     wandb: WandbConfig = field(default_factory=WandbConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
 
     @classmethod
     def from_dict(
@@ -60,6 +77,7 @@ class TrainConfig:
     ) -> "TrainConfig":
         base = cls()
         wandb_cfg = WandbConfig.from_dict(data.get("wandb", {}))
+        network_cfg = NetworkConfig.from_dict(data.get("network", {}))
 
         lmdb_path_raw = data.get("lmdb_path", base.lmdb_path)
         lmdb_path = Path(lmdb_path_raw)
@@ -82,6 +100,7 @@ class TrainConfig:
             loss_mae_weight=float(data.get("loss_mae_weight", base.loss_mae_weight)),
             loss_scale=float(data.get("loss_scale", base.loss_scale)),
             wandb=wandb_cfg,
+            network=network_cfg,
         )
 
     def to_log_dict(self) -> Dict[str, Any]:
@@ -142,15 +161,17 @@ def prepare_batch(
     return latents_past, latents_future, actions_past, actions_future
 
 
-def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8:
+def build_model(
+    device: torch.device, dtype: torch.dtype, network: NetworkConfig
+) -> VideoARTCoreCV8x8x8:
     model = VideoARTCoreCV8x8x8(
         t_in_latent=8,
         c_latent=2,
         frames_per_latent=8,
         action_dim_raw=3,
-        d_model=128,
-        num_layers=2,
-        num_heads=2,
+        d_model=network.d_model,
+        num_layers=network.num_layers,
+        num_heads=network.num_heads,
         dim_feedforward=512,
         t_future_latent=16,
         gradient_checkpointing=True,
@@ -197,7 +218,7 @@ def train(args: argparse.Namespace) -> None:
     dataloader = make_dataloader(
         config.lmdb_path, config.batch_size, config.num_workers
     )
-    model = build_model(device, dtype)
+    model = build_model(device, dtype, config.network)
     model.train()
 
     optimizer = torch.optim.AdamW(
