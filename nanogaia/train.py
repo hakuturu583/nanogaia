@@ -157,6 +157,7 @@ def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8
     ).to(device=device, dtype=dtype)
     return model
 
+
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -229,11 +230,10 @@ def train(args: argparse.Namespace) -> None:
                 target_z = z_future
 
                 loss_mse = F.mse_loss(pred_z, target_z)
-                loss_mae = F.l1_loss(pred_z, target_z)
-                mixed_loss = (
-                    config.loss_mse_weight * loss_mse
-                    + config.loss_mae_weight * loss_mae
+                loss_mae = F.l1_loss(
+                    config.loss_scale * pred_z, config.loss_scale * target_z, beta=0.1
                 )
+                mixed_loss = config.loss_mse_weight * loss_mse + 0.2 * loss_mae
                 loss = config.loss_scale * mixed_loss
 
                 var = pred_z.float().var(
