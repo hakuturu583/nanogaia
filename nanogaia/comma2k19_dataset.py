@@ -180,14 +180,6 @@ class CommaDataset(Dataset):
 
         sample = self[0]
         frames = sample["image"].astype(np.float32)
-        # latents_past_sample, latents_future_sample = self._encode_latents(
-        #     frames, tokenizer
-        # )
-        # bytes_per_sample = (
-        #     latents_past_sample.size * np.dtype(np.float16).itemsize
-        #     + latents_future_sample.size * np.dtype(np.float16).itemsize
-        #     + frames.shape[0] * 3 * np.dtype(np.float32).itemsize
-        # )
 
         env = lmdb.open(
             str(lmdb_path),
@@ -281,6 +273,30 @@ class CommaDataset(Dataset):
             frames.append(frame.astype(np.float32))
 
         return np.stack(frames, axis=0)
+
+    @staticmethod
+    def decode_as_video(
+        frames: np.ndarray,
+        output_path: str,
+        fps: int = 4,
+    ) -> str:
+        """
+        Write an mp4 from a frame sequence shaped (T, H, W, 3) in RGB.
+        """
+        if frames.ndim != 4 or frames.shape[-1] != 3:
+            raise ValueError("frames must be (T, H, W, 3) RGB")
+
+        frames_uint8 = np.clip(frames, 0, 255).astype(np.uint8)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        T, H, W, _ = frames_uint8.shape
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
+        for t in range(T):
+            bgr = cv2.cvtColor(frames_uint8[t], cv2.COLOR_RGB2BGR)
+            writer.write(bgr)
+        writer.release()
+        return output_path
 
     @staticmethod
     def _get_diff_2d_pose(
