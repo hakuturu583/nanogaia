@@ -107,8 +107,10 @@ class CosmosVideoTokenizer(nn.Module):
             latents_t = latents_t.unsqueeze(0)
         if latents_t.dim() != 5:
             raise ValueError("latents must be (C,T,H,W) or (B,C,T,H,W)")
+        print(f"  Final latents tensor shape for decoding: {latents_t.shape}")
 
         video = self.decode(latents_t).cpu()  # (B, C, T, H, W)
+        print("  Decoded latents to video tensor, shape:", video.shape)
         frames = video[0].permute(1, 2, 3, 0)  # (T, H, W, C)
         frames = torch.clamp(frames, -1.0, 1.0)
         frames = ((frames + 1.0) * 127.5).byte().numpy()

@@ -201,7 +201,7 @@ def train(args: argparse.Namespace) -> None:
     tokenizer_for_logging = None
     if use_wandb and config.video_interval > 0:
         tokenizer_for_logging = CosmosVideoTokenizer(
-            device="cpu",
+            device=device,
             dtype=dtype,
         )
 
@@ -255,13 +255,15 @@ def train(args: argparse.Namespace) -> None:
                     tgt_fd, tgt_path = tempfile.mkstemp(suffix=".mp4")
                     os.close(pred_fd)
                     os.close(tgt_fd)
-
+                    print(f"Starting video decode for logging at step {global_step}...")
                     tokenizer_for_logging.decode_as_video(
-                        pred_future[0].detach().cpu().float(), pred_path, fps=config.video_fps
+                        pred_future[0], pred_path, fps=config.video_fps
                     )
+                    print(f"Predicted video written to {pred_path}")
                     tokenizer_for_logging.decode_as_video(
-                        z_future[0].detach().cpu().float(), tgt_path, fps=config.video_fps
+                        z_future[0], tgt_path, fps=config.video_fps
                     )
+                    print(f"Completed video decode for logging at step {global_step}.")
                 wandb.log(
                     {
                         "train/sample_pred_video": wandb.Video(
