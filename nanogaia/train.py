@@ -181,7 +181,8 @@ def train(args: argparse.Namespace) -> None:
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        use_bf16 = torch.cuda.is_bf16_supported()
+        dtype = torch.bfloat16 if use_bf16 else torch.float16
     else:
         dtype = torch.float32
 
@@ -215,7 +216,8 @@ def train(args: argparse.Namespace) -> None:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+    scaler_enabled = device.type == "cuda" and dtype == torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=scaler_enabled)
     amp_enabled = device.type == "cuda"
 
     tokenizer_for_logging = None
@@ -234,18 +236,22 @@ def train(args: argparse.Namespace) -> None:
 
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(
-                device_type=device.type, dtype=torch.float16, enabled=amp_enabled
+                device_type=device.type, dtype=dtype, enabled=amp_enabled
             ):
                 pred_future = model(z_past, actions_past, actions_future)
 
                 # Align target length with prediction; extra frames are truncated.
                 target = z_future.permute(0, 2, 1, 3, 4)
                 target = target[:, :, : pred_future.shape[2]]
-                loss = F.l1_loss(pred_future, target)
+                loss = F.mse_loss(pred_future, target)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            if scaler_enabled:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
 
             if global_step % config.log_interval == 0:
                 print(

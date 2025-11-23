@@ -245,7 +245,7 @@ class LatentFlattener(nn.Module):
             )
 
         z = tokens.view(B, t_out, H, W, C)  # (B, T_out, H, W, C)
-        z = z.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
+        z = z.permute(0, 4, 1, 2, 3)  # (B, C, T_out, H, W)
         return z
 
 
@@ -416,9 +416,9 @@ class FlashDecoder(nn.Module):
         for layer in self.layers:
             if self.gradient_checkpointing and x.requires_grad:
                 if cross_kv is None:
-                    x = checkpoint(lambda inp: layer(inp, None), x)
+                    x = checkpoint(lambda inp: layer(inp, None), x, use_reentrant=False)
                 else:
-                    x = checkpoint(layer, x, cross_kv)
+                    x = checkpoint(layer, x, cross_kv, use_reentrant=False)
             else:
                 x = layer(x, cross_kv)
         return self.norm(x)
@@ -532,7 +532,16 @@ class VideoARTCoreCV8x8x8(nn.Module):
         # 5) project back to latent channel dim
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
-        # 7) tokens → latent (T_out = 8)
+        # 6) keep only the tokens needed for the requested future steps
+        H, W = self.flattener.h, self.flattener.w
+        needed = self.t_future_latent * H * W
+        if h_latent.shape[1] < needed:
+            raise ValueError(
+                f"Decoder produced {h_latent.shape[1]} tokens, but {needed} are required for t_out={self.t_future_latent}"
+            )
+        h_latent = h_latent[:, :needed, :]
+
+        # 7) tokens → latent (B, C_lat, T_out, H, W)
         z_future = self.flattener.tokens_to_latent(h_latent, t_out=self.t_future_latent)
         # z_future: (B, C_lat, 1, H, W)
         return z_future
