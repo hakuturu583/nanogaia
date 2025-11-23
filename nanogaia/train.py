@@ -267,10 +267,14 @@ def train(args: argparse.Namespace) -> None:
                 wandb.log(
                     {
                         "train/sample_pred_video": wandb.Video(
-                            pred_path, fps=config.video_fps, caption="pred"
+                            pred_path,
+                            caption="pred",
+                            format="mp4",
                         ),
                         "train/sample_target_video": wandb.Video(
-                            tgt_path, fps=config.video_fps, caption="target"
+                            tgt_path,
+                            caption="target",
+                            format="mp4",
                         ),
                     },
                     step=global_step,
