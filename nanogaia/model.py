@@ -209,7 +209,7 @@ class ActionEmbedding(nn.Module):
 
 
 class LatentFlattener(nn.Module):
-    def __init__(self, c_latent: int = 1, height: int = 30, width: int = 40):
+    def __init__(self, c_latent: int = 2, height: int = 30, width: int = 40):
         super().__init__()
         self.c_latent = c_latent
         self.h = height
@@ -419,7 +419,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
 
     def __init__(
         self,
-        c_latent: int = 1,
+        c_latent: int = 2,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 1,
@@ -527,7 +527,7 @@ class CosmosVideoARModel(nn.Module):
     def __init__(
         self,
         tokenizer: CosmosVideoTokenizer,
-        c_latent: int = 1,
+        c_latent: int = 2,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 1,

@@ -128,14 +128,13 @@ def prepare_batch(
     actions_past = batch["actions_past"].to(device=device, dtype=dtype)
     actions_future = batch["actions_future"].to(device=device, dtype=dtype)
 
-    z_past = latents_past.permute(0, 2, 1, 3, 4)  # (B, T, C, H, W)
-    z_future = latents_future.permute(0, 2, 1, 3, 4)
-    return z_past, z_future, actions_past, actions_future
+    return latents_past, latents_future, actions_past, actions_future
 
 
 def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8:
     model = VideoARTCoreCV8x8x8(
-        t_in_latent=1,
+        t_in_latent=2,
+        c_latent=2,
         frames_per_latent=8,
         action_dim_raw=3,
         d_model=256,
