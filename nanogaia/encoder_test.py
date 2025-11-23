@@ -46,7 +46,9 @@ def main() -> None:
         help=f"Path to raw_images directory (default: {default_raw})",
     )
     parser.add_argument("--start", type=int, default=0, help="First frame index")
-    parser.add_argument("--end", type=int, default=7, help="Last frame index (inclusive)")
+    parser.add_argument(
+        "--end", type=int, default=7, help="Last frame index (inclusive)"
+    )
     parser.add_argument(
         "--output",
         type=Path,

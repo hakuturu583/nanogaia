@@ -264,9 +264,7 @@ class CommaDataset(Dataset):
         into RGB frames shaped (T, H, W, 3) uint8.
         """
         latents_t = (
-            torch.from_numpy(latents)
-            if isinstance(latents, np.ndarray)
-            else latents
+            torch.from_numpy(latents) if isinstance(latents, np.ndarray) else latents
         )
         if latents_t.dim() == 4:
             latents_t = latents_t.unsqueeze(0)

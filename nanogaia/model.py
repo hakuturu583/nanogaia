@@ -271,15 +271,16 @@ class FiLMTokenFuser(nn.Module):
             (B, N, c_tok)            # (B, N, d_model)
         """
         # Aggregate over time (if T>1)
-        a = a_emb.mean(dim=1)                # (B, d_model)
+        a = a_emb.mean(dim=1)  # (B, d_model)
 
-        gamma_beta = self.to_gamma_beta(a)   # (B, 2*c_tok)
+        gamma_beta = self.to_gamma_beta(a)  # (B, 2*c_tok)
         gamma, beta = gamma_beta.chunk(2, dim=-1)  # (B, c_tok), (B, c_tok)
 
-        gamma = gamma.unsqueeze(1)           # (B, 1, c_tok)
-        beta  = beta.unsqueeze(1)            # (B, 1, c_tok)
+        gamma = gamma.unsqueeze(1)  # (B, 1, c_tok)
+        beta = beta.unsqueeze(1)  # (B, 1, c_tok)
 
-        return gamma * z_tokens + beta       # (B, N, c_tok)
+        return gamma * z_tokens + beta  # (B, N, c_tok)
+
 
 class TokenFuser(nn.Module):
     """
@@ -287,7 +288,9 @@ class TokenFuser(nn.Module):
     Output is suitable as input to the Transformer decoder: (B, N, d_model).
     """
 
-    def __init__(self, c_latent: int, d_model: int, t_latent: int, h_tok: int, w_tok: int):
+    def __init__(
+        self, c_latent: int, d_model: int, t_latent: int, h_tok: int, w_tok: int
+    ):
         super().__init__()
         self.t_latent = t_latent
         self.h_tok = h_tok
@@ -315,12 +318,13 @@ class TokenFuser(nn.Module):
         # assert N == T * Ht * Wt, f"Expected N=T*H*W={T*Ht*Wt}, got N={N}"
 
         # latent channels -> d_model
-        tok = self.video_proj(z_tokens)     # (B, N, d_model)
+        tok = self.video_proj(z_tokens)  # (B, N, d_model)
 
         # FiLM modulation using actions
-        tok = self.film(tok, a_emb)         # (B, N, d_model)
+        tok = self.film(tok, a_emb)  # (B, N, d_model)
 
         return tok
+
 
 class FlashDecoderLayer(nn.Module):
     """

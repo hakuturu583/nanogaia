@@ -49,7 +49,9 @@ class TrainConfig:
     wandb: WandbConfig = field(default_factory=WandbConfig)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], base_path: Path | None = None) -> "TrainConfig":
+    def from_dict(
+        cls, data: Dict[str, Any], base_path: Path | None = None
+    ) -> "TrainConfig":
         base = cls()
         wandb_cfg = WandbConfig.from_dict(data.get("wandb", {}))
 
@@ -133,7 +135,7 @@ def prepare_batch(
 
 def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8:
     model = VideoARTCoreCV8x8x8(
-        t_in_latent=2,
+        t_in_latent=8,
         c_latent=2,
         frames_per_latent=8,
         action_dim_raw=3,
@@ -198,7 +200,9 @@ def train(args: argparse.Namespace) -> None:
             config=config.to_log_dict(),
         )
 
-    dataloader = make_dataloader(config.lmdb_path, config.batch_size, config.num_workers)
+    dataloader = make_dataloader(
+        config.lmdb_path, config.batch_size, config.num_workers
+    )
     model = build_model(device, dtype)
     model.train()
 
@@ -209,7 +213,7 @@ def train(args: argparse.Namespace) -> None:
     tokenizer_for_logging = None
     if use_wandb and config.video_interval > 0:
         tokenizer_for_logging = CosmosVideoTokenizer(
-            device=str(device),
+            device="cpu",
             dtype=dtype,
         )
 

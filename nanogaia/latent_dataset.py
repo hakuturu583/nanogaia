@@ -95,6 +95,7 @@ class LatentDataset(Dataset):
         except Exception:
             pass
 
+
 if __name__ == "__main__":
     import argparse
 
@@ -127,4 +128,3 @@ if __name__ == "__main__":
         tokenizer=CosmosVideoTokenizer(),
         output_path=f"sample_{args.index:08d}.mp4",
     )
-    
