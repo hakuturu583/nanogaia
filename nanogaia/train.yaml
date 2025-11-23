@@ -16,6 +16,7 @@ network:
   d_model: 128
   num_layers: 4
   num_heads: 2
+  dtype: null
 wandb:
   project: nanogaia
   run_name: null
