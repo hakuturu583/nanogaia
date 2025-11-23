@@ -2,14 +2,17 @@
 Cosmos-1.0-Tokenizer-CV8x8x8 + FlashAttention2 Transformer
 Autoregressive latent video prediction model (240p).
 
-- Input:   video_past  (B, 16, 3, 240, 320), normalized to [-1, 1]
-- Input:   actions_past (B, 16, D_action_raw)
+- Input:   video_past  (B, 8, 3, 240, 320), normalized to [-1, 1]
+- Input:   actions_past (B, 8, D_action_raw)
 - Output:  video_future_pred (B, ~8, 3, 240, 320)
 
-The VAE compresses time by 8×, so 16 frames become 2 latent steps.
+The VAE compresses time by 8×, so 8 frames become 1 latent steps.
 Predicting 1 latent step corresponds to ~8 output frames.
 """
 
+import cv2
+import numpy as np
+from pathlib import Path
 import torch
 import torch.nn as nn
 from diffusers import AutoencoderKLCosmos
@@ -85,6 +88,39 @@ class CosmosVideoTokenizer(nn.Module):
         latents = latents.to(self.device, self.dtype)
         recon = self.vae.decode(latents).sample  # (B, C, T, H, W)
         return recon
+
+    @torch.no_grad()
+    def decode_as_video(
+        self,
+        latents: torch.Tensor | np.ndarray,
+        output_path: str,
+        fps: int = 4,
+    ) -> str:
+        """
+        Decode latents and write an mp4 video. Expects (C_lat, T_lat, H_lat, W_lat) or batched.
+        """
+        latents_t = (
+            torch.from_numpy(latents) if isinstance(latents, np.ndarray) else latents
+        )
+        if latents_t.dim() == 4:
+            latents_t = latents_t.unsqueeze(0)
+        if latents_t.dim() != 5:
+            raise ValueError("latents must be (C,T,H,W) or (B,C,T,H,W)")
+
+        video = self.decode(latents_t).cpu()  # (B, C, T, H, W)
+        frames = video[0].permute(1, 2, 3, 0)  # (T, H, W, C)
+        frames = torch.clamp(frames, -1.0, 1.0)
+        frames = ((frames + 1.0) * 127.5).byte().numpy()
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        T, H, W, _ = frames.shape
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
+        for t in range(T):
+            bgr = cv2.cvtColor(frames[t], cv2.COLOR_RGB2BGR)
+            writer.write(bgr)
+        writer.release()
+        return output_path
 
 
 # =========================================================
@@ -173,7 +209,7 @@ class ActionEmbedding(nn.Module):
 
 
 class LatentFlattener(nn.Module):
-    def __init__(self, c_latent: int = 3, height: int = 30, width: int = 40):
+    def __init__(self, c_latent: int = 1, height: int = 30, width: int = 40):
         super().__init__()
         self.c_latent = c_latent
         self.h = height
@@ -204,7 +240,6 @@ class LatentFlattener(nn.Module):
 
         z = tokens.view(B, t_out, H, W, C)  # (B, T, H, W, C)
         z = z.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
-        print("z shape:", z.shape)  # --- IGNORE ---
         return z
 
 
@@ -220,9 +255,8 @@ class TokenFuser(nn.Module):
 
     def __init__(self, c_tok: int, d_model: int, t_latent: int, h_tok: int, w_tok: int):
         super().__init__()
-        self.video_proj = nn.Linear(c_tok, d_model // 2)
-        self.action_proj = nn.Linear(d_model, d_model // 2)
-        self.out_proj = nn.Linear(d_model, d_model)
+        self.action_proj = nn.Linear(d_model, c_tok)
+        self.out_proj   = nn.Linear(c_tok * 2, d_model)
 
         self.t_latent = t_latent
         self.h_tok = h_tok
@@ -230,28 +264,24 @@ class TokenFuser(nn.Module):
 
     def forward(self, z_tokens: torch.Tensor, a_emb: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-            z_tokens: (B, N, C_tok)
-            a_emb:    (B, T, d_model)
-
-        Returns:
-            (B, N, d_model)
+        z_tokens: (B, N, c_tok)      # VAE latent
+        a_emb:    (B, T, d_model)    # action embedding
         """
         B, N, _ = z_tokens.shape
         T = self.t_latent
         Ht, Wt = self.h_tok, self.w_tok
-        assert N == T * Ht * Wt
+        print(T, Ht, Wt)
+        print(N)
+        # assert N == T * Ht * Wt
 
-        z = self.video_proj(z_tokens)
+        a = a_emb.unsqueeze(2).expand(B, T, Ht * Wt, a_emb.size(-1))  # (B, T, N_spatial, d_model)
+        a = a.reshape(B, N, -1)  # (B, N, d_model)
 
-        # Expand action embeddings across spatial cells
-        a = a_emb.unsqueeze(2)
-        a = a.expand(B, T, Ht * Wt, a.size(-1))
-        a = a.reshape(B, N, -1)
-        a = self.action_proj(a)
+        a = self.action_proj(a)  # (B, N, c_tok)
 
-        tok = torch.cat([z, a], dim=-1)
-        tok = self.out_proj(tok)
+        fused = torch.cat([z_tokens, a], dim=-1)  # (B, N, 2*c_tok)
+
+        tok = self.out_proj(fused)  # (B, N, d_model)
         return tok
 
 
@@ -352,7 +382,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
 
     def __init__(
         self,
-        c_latent: int = 3,
+        c_latent: int = 1,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 1,
@@ -423,13 +453,6 @@ class VideoARTCoreCV8x8x8(nn.Module):
             z_future_pred: (B, C_lat, 1, H, W)  # 1 latent time step
         """
         B, T, C, H, W = z_past.shape
-        # t_in_latent is the expected latent time steps; we keep a safety check but prefer matching the actual tensor
-        if T != self.t_in_latent:
-            raise ValueError(
-                f"Expected latent T={self.t_in_latent}, got {T}. "
-                "Ensure frames_per_latent and t_in_latent align with tokenizer compression."
-            )
-
         if actions_future is None:
             raise ValueError(
                 "actions_future is required for cross-attention conditioning."
@@ -451,7 +474,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         # 5) project back to latent channel dim
         h_latent = self.to_latent_tok(h)  # (B, N, C_lat)
 
-        # 7) tokens → latent (T_out = 16)
+        # 7) tokens → latent (T_out = 8)
         z_future = self.flattener.tokens_to_latent(h_latent, t_out=self.t_future_latent)
         # z_future: (B, C_lat, 1, H, W)
         return z_future
@@ -467,7 +490,7 @@ class CosmosVideoARModel(nn.Module):
     def __init__(
         self,
         tokenizer: CosmosVideoTokenizer,
-        c_latent: int = 3,
+        c_latent: int = 1,
         h_latent: int = 30,
         w_latent: int = 40,
         t_in_latent: int = 1,
@@ -529,7 +552,7 @@ class CosmosVideoARModel(nn.Module):
 
 if __name__ == "__main__":
     B = 1
-    T_in = 16
+    T_in = 1
     H, W = 240, 320
     D_action_raw = 10
 
@@ -545,10 +568,10 @@ if __name__ == "__main__":
 
     model = CosmosVideoARModel(
         tokenizer=tokenizer,
-        c_latent=3,
+        c_latent=1,
         h_latent=30,
         w_latent=40,
-        t_in_latent=T_in,  # expect T_lat=2 for 16 frames
+        t_in_latent=T_in,  # expect T_lat=1 for 8 frames
         frames_per_latent=8,  # 16 frames / 2 latent steps
         action_dim_raw=D_action_raw,
         d_model=512,

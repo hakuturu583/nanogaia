@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict
 import lmdb
 import numpy as np
 from torch.utils.data import Dataset
+from nanogaia.model import CosmosVideoTokenizer
 
 
 class LatentDataset(Dataset):
@@ -66,6 +67,22 @@ class LatentDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
         return sample
+
+    def decode(
+        self,
+        index: int,
+        tokenizer: CosmosVideoTokenizer,
+        output_path: str,
+        fps: int = 4,
+    ) -> str:
+        """
+        Decode past+future latents at the given index and write an mp4 video.
+        """
+        sample = self[index]
+        latents = np.concatenate(
+            [sample["latent_past"], sample["latent_future"]], axis=1
+        )
+        return tokenizer.decode_as_video(latents, output_path, fps=fps)
 
     def close(self) -> None:
         if getattr(self, "env", None) is not None:
