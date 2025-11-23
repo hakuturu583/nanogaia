@@ -2,17 +2,99 @@ import argparse
 import os
 import sys
 import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import cv2
+import yaml
 
 from nanogaia.latent_dataset import LatentDataset
 from nanogaia.model import CosmosVideoTokenizer, VideoARTCoreCV8x8x8
+
+
+@dataclass
+class WandbConfig:
+    project: str = "nanogaia"
+    run_name: str | None = None
+    disable: bool = False
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WandbConfig":
+        base = cls()
+        return cls(
+            project=data.get("project", base.project),
+            run_name=data.get("run_name", base.run_name),
+            disable=bool(data.get("disable", base.disable)),
+        )
+
+
+@dataclass
+class TrainConfig:
+    lmdb_path: Path = Path(__file__).resolve().parent / "dataset" / "latent.lmdb"
+    batch_size: int = 1
+    num_workers: int = 0
+    epochs: int = 1
+    lr: float = 1e-4
+    weight_decay: float = 1e-4
+    log_interval: int = 10
+    video_interval: int = 200
+    video_fps: int = 4
+    max_steps: int = 0
+    device: str | None = None
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], base_path: Path | None = None) -> "TrainConfig":
+        base = cls()
+        wandb_cfg = WandbConfig.from_dict(data.get("wandb", {}))
+
+        lmdb_path_raw = data.get("lmdb_path", base.lmdb_path)
+        lmdb_path = Path(lmdb_path_raw)
+        if base_path and not lmdb_path.is_absolute():
+            lmdb_path = (base_path / lmdb_path).resolve()
+
+        return cls(
+            lmdb_path=lmdb_path,
+            batch_size=int(data.get("batch_size", base.batch_size)),
+            num_workers=int(data.get("num_workers", base.num_workers)),
+            epochs=int(data.get("epochs", base.epochs)),
+            lr=float(data.get("lr", base.lr)),
+            weight_decay=float(data.get("weight_decay", base.weight_decay)),
+            log_interval=int(data.get("log_interval", base.log_interval)),
+            video_interval=int(data.get("video_interval", base.video_interval)),
+            video_fps=int(data.get("video_fps", base.video_fps)),
+            max_steps=int(data.get("max_steps", base.max_steps)),
+            device=data.get("device", base.device),
+            wandb=wandb_cfg,
+        )
+
+    def to_log_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        payload["lmdb_path"] = str(self.lmdb_path)
+        return payload
+
+
+def load_train_config(path: Path) -> TrainConfig:
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with path.open("r") as handle:
+        raw = yaml.safe_load(handle) or {}
+    return TrainConfig.from_dict(raw, base_path=path.parent)
+
+
+def apply_cli_overrides(config: TrainConfig, args: argparse.Namespace) -> TrainConfig:
+    if args.device:
+        config.device = args.device
+    if args.wandb_run_name:
+        config.wandb.run_name = args.wandb_run_name
+    if args.disable_wandb:
+        config.wandb.disable = True
+    return config
 
 
 def to_tensor(sample: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
@@ -125,12 +207,15 @@ def decode_and_save_video(
 
 
 def train(args: argparse.Namespace) -> None:
+    config = load_train_config(args.config)
+    config = apply_cli_overrides(config, args)
+
     device = torch.device(
-        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        config.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
     dtype = torch.float16 if device.type == "cuda" else torch.float32
 
-    use_wandb = not args.disable_wandb
+    use_wandb = not config.wandb.disable
     wandb_run = None
     wandb = None
     if use_wandb:
@@ -140,34 +225,34 @@ def train(args: argparse.Namespace) -> None:
             raise ImportError(
                 "wandb is required for logging; install with `pip install wandb` or pass --disable-wandb."
             ) from exc
-        default_run_name = args.wandb_run_name
+        default_run_name = config.wandb.run_name
         if default_run_name is None:
             from datetime import datetime, timezone
 
             default_run_name = datetime.now(timezone.utc).isoformat()
         wandb_run = wandb.init(
-            project=args.wandb_project,
+            project=config.wandb.project,
             name=default_run_name,
-            config=vars(args),
+            config=config.to_log_dict(),
         )
 
-    dataloader = make_dataloader(Path(args.lmdb_path), args.batch_size, args.num_workers)
+    dataloader = make_dataloader(config.lmdb_path, config.batch_size, config.num_workers)
     model = build_model(device, dtype)
     model.train()
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+        model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
 
     tokenizer_for_logging = None
-    if use_wandb and args.video_interval > 0:
+    if use_wandb and config.video_interval > 0:
         tokenizer_for_logging = CosmosVideoTokenizer(
             device=str(device),
             dtype=dtype,
         )
 
     global_step = 0
-    for epoch in range(args.epochs):
+    for epoch in range(config.epochs):
         for batch in dataloader:
             z_past, z_future, actions_past, actions_future = prepare_batch(
                 batch, device, dtype
@@ -183,7 +268,7 @@ def train(args: argparse.Namespace) -> None:
             loss.backward()
             optimizer.step()
 
-            if global_step % args.log_interval == 0:
+            if global_step % config.log_interval == 0:
                 print(
                     f"epoch {epoch} step {global_step} "
                     f"loss {loss.item():.4f} device {device} dtype {dtype}"
@@ -199,9 +284,9 @@ def train(args: argparse.Namespace) -> None:
 
             if (
                 use_wandb
-                and args.video_interval > 0
+                and config.video_interval > 0
                 and global_step > 0
-                and global_step % args.video_interval == 0
+                and global_step % config.video_interval == 0
                 and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
@@ -209,12 +294,12 @@ def train(args: argparse.Namespace) -> None:
                         pred_future.detach(),
                         target.detach(),
                         tokenizer_for_logging,
-                        fps=args.video_fps,
+                        fps=config.video_fps,
                     )
                 wandb.log(
                     {
                         "train/sample_video": wandb.Video(
-                            video_path, fps=args.video_fps, caption="pred | target"
+                            video_path, fps=config.video_fps, caption="pred | target"
                         )
                     },
                     step=global_step,
@@ -222,7 +307,7 @@ def train(args: argparse.Namespace) -> None:
                 os.remove(video_path)
 
             global_step += 1
-            if args.max_steps and global_step >= args.max_steps:
+            if config.max_steps and global_step >= config.max_steps:
                 print("Reached max_steps, stopping training loop.")
                 if wandb_run:
                     wandb_run.finish()
@@ -237,38 +322,27 @@ def parse_args() -> argparse.Namespace:
         description="Train VideoARTCoreCV8x8x8 on latent LMDB windows."
     )
     parser.add_argument(
-        "--lmdb-path",
+        "--config",
         type=Path,
-        default=Path(__file__).resolve().parent / "dataset" / "latent.lmdb",
-        help="Path to latent LMDB produced by CommaDataset.export_as_latent_data.",
-    )
-    parser.add_argument("--batch-size", type=int, default=1)
-    parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--log-interval", type=int, default=10)
-    parser.add_argument(
-        "--video-interval",
-        type=int,
-        default=200,
-        help="Global step interval to log mp4 to wandb.",
+        default=Path(__file__).resolve().parent / "train.yaml",
+        help="Path to YAML config defining training hyperparameters.",
     )
     parser.add_argument(
-        "--video-fps", type=int, default=4, help="FPS for logged videos."
+        "--device",
+        type=str,
+        default=None,
+        help="Override device from config (e.g., cuda:0 or cpu).",
     )
     parser.add_argument(
-        "--max-steps", type=int, default=0, help="0 disables early stop."
+        "--wandb-run-name",
+        type=str,
+        default=None,
+        help="Override W&B run name specified in config.",
     )
-    parser.add_argument(
-        "--device", type=str, default=None, help="Override device e.g. cuda:0 or cpu"
-    )
-    parser.add_argument("--wandb-project", type=str, default="nanogaia")
-    parser.add_argument("--wandb-run-name", type=str, default=None)
     parser.add_argument(
         "--disable-wandb",
         action="store_true",
-        help="Disable wandb logging (metrics and videos).",
+        help="Force disable wandb logging regardless of config.",
     )
     return parser.parse_args()
 

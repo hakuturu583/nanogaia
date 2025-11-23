@@ -20,6 +20,7 @@ dependencies = [
     "weave>=0.52.17",
     "lmdb>=1.7.5",
     "tqdm>=4.67.1",
+    "dataclasses>=0.8",
 ]
 
 [build-system]
