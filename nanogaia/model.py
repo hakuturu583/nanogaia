@@ -18,6 +18,7 @@ import torch.nn as nn
 from diffusers import AutoencoderKLCosmos
 from flash_attn.modules.mha import MHA as FlashMHA
 from torch.utils.checkpoint import checkpoint
+import imageio.v2 as imageio
 
 
 # =========================================================
@@ -116,12 +117,6 @@ class CosmosVideoTokenizer(nn.Module):
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         suffix = Path(output_path).suffix.lower()
         if suffix == ".gif":
-            try:
-                import imageio.v2 as imageio
-            except ImportError as exc:
-                raise ImportError(
-                    "imageio is required to write GIFs; install with `pip install imageio`."
-                ) from exc
             imageio.mimsave(output_path, frames, duration=1 / fps)
         else:
             # Default: H.264 MP4 for broad compatibility
