@@ -122,3 +122,9 @@ if __name__ == "__main__":
     print("Latent future shape:", sample["latent_future"].shape)
     print("Actions past shape:", sample["actions_past"].shape)
     print("Actions future shape:", sample["actions_future"].shape)
+    dataset.decode(
+        args.index,
+        tokenizer=CosmosVideoTokenizer(),
+        output_path=f"sample_{args.index:08d}.mp4",
+    )
+    
