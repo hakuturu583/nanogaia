@@ -256,7 +256,7 @@ def train(args: argparse.Namespace) -> None:
                     os.close(pred_fd)
                     os.close(tgt_fd)
                     tokenizer_for_logging.decode_as_video(
-                        pred_future[0], pred_path, fps=config.video_fps
+                        delta_future[0] + z_past[0], pred_path, fps=config.video_fps
                     )
                     tokenizer_for_logging.decode_as_video(
                         z_future[0], tgt_path, fps=config.video_fps
