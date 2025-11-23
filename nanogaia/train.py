@@ -324,8 +324,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).resolve().parent / "train.yaml",
-        help="Path to YAML config defining training hyperparameters.",
+        required=True,
+        help="Path to YAML config defining training hyperparameters (e.g., nanogaia/train.yaml).",
     )
     parser.add_argument(
         "--device",
