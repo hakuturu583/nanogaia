@@ -548,9 +548,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         h_latent = h_latent[:, :needed, :]
 
         # 7) tokens → latent (B, T_out, C_lat, H, W)
-        delta_future = self.flattener.tokens_to_latent(
-            h_latent, t_out=self.t_future_latent
-        )
+        delta_future = self.flattener.tokens_to_latent(h_latent, t_out=self.t_future_latent)
         # delta_future: (B, C_lat, 1, H, W)
         return delta_future
 
