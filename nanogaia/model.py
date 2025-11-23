@@ -245,7 +245,7 @@ class LatentFlattener(nn.Module):
             )
 
         z = tokens.view(B, t_out, H, W, C)  # (B, T_out, H, W, C)
-        z = z.permute(0, 4, 1, 2, 3)  # (B, C, T_out, H, W)
+        z = z.permute(0, 1, 4, 2, 3)  # (B, T_out, C_lat, H, W)
         return z
 
 
@@ -541,7 +541,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
             )
         h_latent = h_latent[:, :needed, :]
 
-        # 7) tokens → latent (B, C_lat, T_out, H, W)
+        # 7) tokens → latent (B, T_out, C_lat, H, W)
         z_future = self.flattener.tokens_to_latent(h_latent, t_out=self.t_future_latent)
         # z_future: (B, C_lat, 1, H, W)
         return z_future

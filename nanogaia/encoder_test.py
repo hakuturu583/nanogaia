@@ -78,6 +78,7 @@ def main() -> None:
         latents = tokenizer.encode(video)
         print(f"Latents shape: {latents.shape}")
         decoded = tokenizer.decode(latents)
+        print(f"latents[0].shape: {latents[0].shape}")
         tokenizer.decode_as_video(latents[0], str(args.output), fps=4)
 
     # print(f"Wrote decoded video to: {out_path}")

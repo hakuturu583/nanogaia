@@ -275,9 +275,10 @@ def train(args: argparse.Namespace) -> None:
                 and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
+                    print("Pred futuer / target", pred_future.shape, target.shape)
                     video_path = save_video(
-                        pred_future.detach(),
-                        target.detach(),
+                        pred_future.detach().cpu(),
+                        target.detach().cpu(),
                         tokenizer_for_logging,
                         fps=config.video_fps,
                     )
