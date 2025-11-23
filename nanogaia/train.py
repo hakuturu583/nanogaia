@@ -167,7 +167,7 @@ def save_video(
         [pred_latent.detach().cpu(), target_latent.detach().cpu()], dim=4
     )
     # decode_as_video expects (C, T, H, W) or (B, C, T, H, W); we pass first sample
-    tokenizer.decode_as_video(combined[0].numpy(), path, fps=fps)
+    tokenizer.decode_as_video(combined[0].float().numpy(), path, fps=fps)
     return path
 
 
