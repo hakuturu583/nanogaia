@@ -111,16 +111,27 @@ class CosmosVideoTokenizer(nn.Module):
         video = self.decode(latents_t).cpu()  # (B, C, T, H, W)
         frames = video[0].permute(1, 2, 3, 0)  # (T, H, W, C)
         frames = torch.clamp(frames, -1.0, 1.0)
-        frames = ((frames + 1.0) * 127.5).byte().numpy()
+        frames = ((frames + 1.0) * 255.0 / 2.0).byte().numpy()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        T, H, W, _ = frames.shape
-        writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
-        for t in range(T):
-            bgr = cv2.cvtColor(frames[t], cv2.COLOR_RGB2BGR)
-            writer.write(bgr)
-        writer.release()
+        suffix = Path(output_path).suffix.lower()
+        if suffix == ".gif":
+            try:
+                import imageio.v2 as imageio
+            except ImportError as exc:
+                raise ImportError(
+                    "imageio is required to write GIFs; install with `pip install imageio`."
+                ) from exc
+            imageio.mimsave(output_path, frames, duration=1 / fps)
+        else:
+            # Default: H.264 MP4 for broad compatibility
+            fourcc = cv2.VideoWriter_fourcc(*"avc1")
+            T, H, W, _ = frames.shape
+            writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
+            for t in range(T):
+                bgr = cv2.cvtColor(frames[t], cv2.COLOR_RGB2BGR)
+                writer.write(bgr)
+            writer.release()
         return output_path
 
 

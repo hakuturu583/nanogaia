@@ -251,30 +251,27 @@ def train(args: argparse.Namespace) -> None:
                 and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
-                    pred_fd, pred_path = tempfile.mkstemp(suffix=".mp4")
-                    tgt_fd, tgt_path = tempfile.mkstemp(suffix=".mp4")
+                    pred_fd, pred_path = tempfile.mkstemp(suffix=".gif")
+                    tgt_fd, tgt_path = tempfile.mkstemp(suffix=".gif")
                     os.close(pred_fd)
                     os.close(tgt_fd)
-                    print(f"Starting video decode for logging at step {global_step}...")
                     tokenizer_for_logging.decode_as_video(
                         pred_future[0], pred_path, fps=config.video_fps
                     )
-                    print(f"Predicted video written to {pred_path}")
                     tokenizer_for_logging.decode_as_video(
                         z_future[0], tgt_path, fps=config.video_fps
                     )
-                    print(f"Completed video decode for logging at step {global_step}.")
                 wandb.log(
                     {
                         "train/sample_pred_video": wandb.Video(
                             pred_path,
                             caption="pred",
-                            format="mp4",
+                            format="gif",
                         ),
                         "train/sample_target_video": wandb.Video(
                             tgt_path,
                             caption="target",
-                            format="mp4",
+                            format="gif",
                         ),
                     },
                     step=global_step,
