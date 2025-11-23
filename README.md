@@ -18,3 +18,9 @@ Artifacts:
 - Videos: side-by-side `pred | target` mp4 logged every `video_interval` steps if wandb is enabled.
 
 To disable W&B entirely (no metrics or videos): add `--disable-wandb`.
+
+### Running wandb
+
+```bash
+uv run wandb server start
+```
