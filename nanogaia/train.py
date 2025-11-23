@@ -148,37 +148,6 @@ def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8
     ).to(device=device, dtype=dtype)
     return model
 
-
-def concat_gifs(
-    gif_a_path: str, gif_b_path: str, output_path: str, fps: int
-) -> str:
-    """
-    Concatenate two GIFs frame-by-frame horizontally and write to output_path.
-    Assumes both GIFs have matching resolution and at least one frame.
-    """
-    import imageio.v2 as imageio
-
-    frames_a = imageio.mimread(gif_a_path)
-    frames_b = imageio.mimread(gif_b_path)
-
-    if not frames_a or not frames_b:
-        raise ValueError("Input GIFs must contain at least one frame.")
-
-    n = min(len(frames_a), len(frames_b))
-    merged = []
-    for i in range(n):
-        a = frames_a[i]
-        b = frames_b[i]
-        if a.shape[:2] != b.shape[:2]:
-            raise ValueError(
-                f"Frame size mismatch at index {i}: {a.shape[:2]} vs {b.shape[:2]}"
-            )
-        merged.append(np.concatenate([a, b], axis=1))
-
-    imageio.mimsave(output_path, merged, duration=1 / fps)
-    return output_path
-
-
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -283,27 +252,34 @@ def train(args: argparse.Namespace) -> None:
                 with torch.no_grad():
                     pred_fd, pred_path = tempfile.mkstemp(suffix=".gif")
                     tgt_fd, tgt_path = tempfile.mkstemp(suffix=".gif")
-                    merged_fd, merged_path = tempfile.mkstemp(suffix=".gif")
+                    source_fd, source_video = tempfile.mkstemp(suffix=".gif")
                     os.close(pred_fd)
                     os.close(tgt_fd)
-                    os.close(merged_fd)
+                    os.close(source_fd)
                     tokenizer_for_logging.decode_as_video(
                         delta_future[0] + z_past[0], pred_path, fps=config.video_fps
                     )
                     tokenizer_for_logging.decode_as_video(
                         z_future[0], tgt_path, fps=config.video_fps
                     )
-                    concat_gifs(
-                        pred_path,
-                        tgt_path,
-                        merged_path,
-                        fps=config.video_fps,
+                    tokenizer_for_logging.decode_as_video(
+                        z_past[0], source_video, fps=config.video_fps
                     )
                 wandb.log(
                     {
-                        "train/sample_video": wandb.Video(
-                            merged_path,
-                            caption="pred | target",
+                        "train/input_video": wandb.Video(
+                            source_video,
+                            caption="input frames",
+                            format="gif",
+                        ),
+                        "train/predicted_future": wandb.Video(
+                            pred_path,
+                            caption="predicted future frames",
+                            format="gif",
+                        ),
+                        "train/target_future": wandb.Video(
+                            tgt_path,
+                            caption="target future frames",
                             format="gif",
                         ),
                     },
@@ -311,7 +287,7 @@ def train(args: argparse.Namespace) -> None:
                 )
                 os.remove(pred_path)
                 os.remove(tgt_path)
-                os.remove(merged_path)
+                os.remove(source_video)
 
             global_step += 1
             if config.max_steps and global_step >= config.max_steps:
