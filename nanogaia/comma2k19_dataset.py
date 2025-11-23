@@ -250,6 +250,29 @@ class CommaDataset(Dataset):
         )
         return latents_past, latents_future
 
+    @staticmethod
+    def _decode_latents(
+        latents: np.ndarray, tokenizer: CosmosVideoTokenizer
+    ) -> np.ndarray:
+        """
+        Decode latents (C, T_lat, H_lat, W_lat) or (B, C, T_lat, H_lat, W_lat)
+        into RGB frames shaped (T, H, W, 3) uint8.
+        """
+        latents_t = (
+            torch.from_numpy(latents)
+            if isinstance(latents, np.ndarray)
+            else latents
+        )
+        if latents_t.dim() == 4:
+            latents_t = latents_t.unsqueeze(0)
+        if latents_t.dim() != 5:
+            raise ValueError("latents must be (C,T,H,W) or (B,C,T,H,W)")
+
+        video = tokenizer.decode(latents_t).cpu()  # (B, C, T, H, W) in [-1, 1]
+        frames = torch.clamp((video + 1.0) * 127.5, 0, 255).to(torch.uint8)
+        frames = frames.permute(0, 2, 3, 4, 1)  # (B, T, H, W, C)
+        return frames[0].numpy()
+
     def _resolve_indices(self, index: int) -> Tuple[int, int]:
         sequence_idx = bisect_right(self.sequence_offsets, index)
         sequence_start = (
