@@ -589,7 +589,7 @@ class CosmosVideoARModel(nn.Module):
 
 if __name__ == "__main__":
     B = 1
-    T_in = 1
+    T_in = 8
     H, W = 240, 320
     D_action_raw = 10
 
@@ -605,7 +605,7 @@ if __name__ == "__main__":
 
     model = CosmosVideoARModel(
         tokenizer=tokenizer,
-        c_latent=1,
+        c_latent=2,
         h_latent=30,
         w_latent=40,
         t_in_latent=T_in,  # expect T_lat=1 for 8 frames
