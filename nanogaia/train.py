@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 import tempfile
@@ -15,6 +16,8 @@ import yaml
 
 from nanogaia.latent_dataset import LatentDataset
 from nanogaia.model import CosmosVideoTokenizer, VideoARTCoreCV8x8x8
+
+LOG_2_PI_E = math.log(2 * math.pi * math.e)
 
 
 @dataclass
@@ -46,6 +49,9 @@ class TrainConfig:
     video_fps: int = 4
     max_steps: int = 0
     device: str | None = None
+    loss_mse_weight: float = 0.8
+    loss_mae_weight: float = 0.2
+    loss_scale: float = 1.0
     wandb: WandbConfig = field(default_factory=WandbConfig)
 
     @classmethod
@@ -72,6 +78,9 @@ class TrainConfig:
             video_fps=int(data.get("video_fps", base.video_fps)),
             max_steps=int(data.get("max_steps", base.max_steps)),
             device=data.get("device", base.device),
+            loss_mse_weight=float(data.get("loss_mse_weight", base.loss_mse_weight)),
+            loss_mae_weight=float(data.get("loss_mae_weight", base.loss_mae_weight)),
+            loss_scale=float(data.get("loss_scale", base.loss_scale)),
             wandb=wandb_cfg,
         )
 
@@ -216,9 +225,22 @@ def train(args: argparse.Namespace) -> None:
                 device_type=device.type, dtype=dtype, enabled=amp_enabled
             ):
                 delta_future = model(z_past, actions_past, actions_future)
+                pred_z = delta_future + z_past
+                target_z = z_future
 
-                # Align target length with prediction; extra frames are truncated.
-                loss = F.mse_loss(delta_future, z_future - z_past)
+                loss_mse = F.mse_loss(pred_z, target_z)
+                loss_mae = F.l1_loss(pred_z, target_z)
+                mixed_loss = (
+                    config.loss_mse_weight * loss_mse
+                    + config.loss_mae_weight * loss_mae
+                )
+                loss = config.loss_scale * mixed_loss
+
+                var = pred_z.float().var(
+                    dim=tuple(range(1, pred_z.dim())), unbiased=False
+                )
+                entropy = 0.5 * (LOG_2_PI_E + torch.log(var.clamp_min(1e-12)))
+                entropy_scalar = entropy.mean().detach()
 
             if scaler_enabled:
                 scaler.scale(loss).backward()
@@ -231,12 +253,18 @@ def train(args: argparse.Namespace) -> None:
             if global_step % config.log_interval == 0:
                 print(
                     f"epoch {epoch} step {global_step} "
-                    f"loss {loss.item():.4f} device {device} dtype {dtype}"
+                    f"loss {loss.item():.4f} mse {loss_mse.item():.4f} "
+                    f"mae {loss_mae.item():.4f} entropy {entropy_scalar.item():.4f} "
+                    f"device {device} dtype {dtype}"
                 )
                 if use_wandb:
                     wandb.log(
                         {
                             "train/loss": loss.item(),
+                            "train/loss_mse": loss_mse.item(),
+                            "train/loss_mae": loss_mae.item(),
+                            "train/entropy": entropy_scalar.item(),
+                            "train/loss_scale": config.loss_scale,
                             "train/epoch": epoch,
                         },
                         step=global_step,

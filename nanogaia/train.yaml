@@ -9,6 +9,9 @@ video_interval: 1000
 video_fps: 4
 max_steps: 0
 device: null
+loss_mse_weight: 0.8
+loss_mae_weight: 0.2
+loss_scale: 10.0
 wandb:
   project: nanogaia
   run_name: null
