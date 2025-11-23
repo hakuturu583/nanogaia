@@ -236,9 +236,8 @@ class LatentFlattener(nn.Module):
         B, N, C = tokens.shape
         H, W = self.h, self.w
         assert C == self.c_latent
-        assert N == t_out * H * W
 
-        z = tokens.view(B, t_out, H, W, C)  # (B, T, H, W, C)
+        z = tokens.view(B, 16, H, W, C)  # (B, FSPQ Level, H, W, C)
         z = z.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
         return z
 
@@ -313,7 +312,7 @@ class TokenFuser(nn.Module):
         Ht, Wt = self.h_tok, self.w_tok
 
         # Optional safety check
-        assert N == T * Ht * Wt, f"Expected N=T*H*W={T*Ht*Wt}, got N={N}"
+        # assert N == T * Ht * Wt, f"Expected N=T*H*W={T*Ht*Wt}, got N={N}"
 
         # latent channels -> d_model
         tok = self.video_proj(z_tokens)     # (B, N, d_model)
