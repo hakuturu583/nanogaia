@@ -248,42 +248,80 @@ class LatentFlattener(nn.Module):
 # =========================================================
 
 
+class FiLMTokenFuser(nn.Module):
+    """
+    Apply FiLM modulation (per-channel gamma/beta) to token embeddings
+    based on action embeddings.
+    """
+
+    def __init__(self, c_tok: int, d_model: int):
+        """
+        Args:
+            c_tok:   token channel dimension (here: we will pass d_model)
+            d_model: action embedding dimension
+        """
+        super().__init__()
+        self.to_gamma_beta = nn.Linear(d_model, 2 * c_tok)
+
+    def forward(self, z_tokens: torch.Tensor, a_emb: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            z_tokens: (B, N, c_tok)  # here: (B, N, d_model)
+            a_emb:    (B, T, d_model)
+        Returns:
+            (B, N, c_tok)            # (B, N, d_model)
+        """
+        # Aggregate over time (if T>1)
+        a = a_emb.mean(dim=1)                # (B, d_model)
+
+        gamma_beta = self.to_gamma_beta(a)   # (B, 2*c_tok)
+        gamma, beta = gamma_beta.chunk(2, dim=-1)  # (B, c_tok), (B, c_tok)
+
+        gamma = gamma.unsqueeze(1)           # (B, 1, c_tok)
+        beta  = beta.unsqueeze(1)            # (B, 1, c_tok)
+
+        return gamma * z_tokens + beta       # (B, N, c_tok)
+
 class TokenFuser(nn.Module):
     """
-    Fuses video tokens and action embeddings into decoder input tokens.
+    Projects VAE latent tokens to d_model and applies FiLM conditioning from actions.
+    Output is suitable as input to the Transformer decoder: (B, N, d_model).
     """
 
-    def __init__(self, c_tok: int, d_model: int, t_latent: int, h_tok: int, w_tok: int):
+    def __init__(self, c_latent: int, d_model: int, t_latent: int, h_tok: int, w_tok: int):
         super().__init__()
-        self.action_proj = nn.Linear(d_model, c_tok)
-        self.out_proj   = nn.Linear(c_tok * 2, d_model)
-
         self.t_latent = t_latent
         self.h_tok = h_tok
         self.w_tok = w_tok
 
+        # 1) latent channel dimension -> d_model
+        self.video_proj = nn.Linear(c_latent, d_model)
+
+        # 2) FiLM in d_model space
+        self.film = FiLMTokenFuser(c_tok=d_model, d_model=d_model)
+
     def forward(self, z_tokens: torch.Tensor, a_emb: torch.Tensor) -> torch.Tensor:
         """
-        z_tokens: (B, N, c_tok)      # VAE latent
-        a_emb:    (B, T, d_model)    # action embedding
+        Args:
+            z_tokens: (B, N, c_latent)
+            a_emb:    (B, T, d_model)
+        Returns:
+            (B, N, d_model)
         """
-        B, N, _ = z_tokens.shape
+        B, N, C = z_tokens.shape
         T = self.t_latent
         Ht, Wt = self.h_tok, self.w_tok
-        print(T, Ht, Wt)
-        print(N)
-        # assert N == T * Ht * Wt
 
-        a = a_emb.unsqueeze(2).expand(B, T, Ht * Wt, a_emb.size(-1))  # (B, T, N_spatial, d_model)
-        a = a.reshape(B, N, -1)  # (B, N, d_model)
+        # Optional safety check
+        assert N == T * Ht * Wt, f"Expected N=T*H*W={T*Ht*Wt}, got N={N}"
 
-        a = self.action_proj(a)  # (B, N, c_tok)
+        # latent channels -> d_model
+        tok = self.video_proj(z_tokens)     # (B, N, d_model)
 
-        fused = torch.cat([z_tokens, a], dim=-1)  # (B, N, 2*c_tok)
+        # FiLM modulation using actions
+        tok = self.film(tok, a_emb)         # (B, N, d_model)
 
-        tok = self.out_proj(fused)  # (B, N, d_model)
         return tok
-
 
 class FlashDecoderLayer(nn.Module):
     """
@@ -420,7 +458,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         )
 
         self.fuser = TokenFuser(
-            c_tok=self.flattener.c_tok,
+            c_latent=c_latent,
             d_model=d_model,
             t_latent=t_in_latent,
             h_tok=h_latent,

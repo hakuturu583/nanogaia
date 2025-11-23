@@ -3,7 +3,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import torch
@@ -11,45 +11,16 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import cv2
 
-from nanogaia.comma2k19_dataset import CommaDataset, ToTensor
-from nanogaia.model import CosmosVideoARModel, CosmosVideoTokenizer
+from nanogaia.latent_dataset import LatentDataset
+from nanogaia.model import CosmosVideoTokenizer, VideoARTCoreCV8x8x8
 
 
-def compute_action_deltas(
-    orientations: torch.Tensor, positions: torch.Tensor
-) -> torch.Tensor:
-    """
-    Compute per-step 2D pose deltas for an entire batch.
-
-    Args:
-        orientations: (B, T, 4) quaternions
-        positions:    (B, T, 3) ECEF positions
-
-    Returns:
-        actions: (B, T, 3) [x, y, yaw] deltas; last step is zero-padded.
-    """
-    B, T, _ = orientations.shape
-    actions = []
-    for b in range(B):
-        ori_b = orientations[b].cpu().numpy()
-        pos_b = positions[b].cpu().numpy()
-        deltas = []
-        for t in range(T):
-            if t + 1 < T:
-                delta = CommaDataset._get_diff_2d_pose(
-                    ori_b[t], pos_b[t], ori_b[t + 1], pos_b[t + 1]
-                )
-            else:
-                delta = np.zeros(3, dtype=np.float64)
-            deltas.append(delta)
-        actions.append(torch.from_numpy(np.stack(deltas, axis=0)))
-    return torch.stack(actions, dim=0)
+def to_tensor(sample: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
+    return {k: torch.from_numpy(v) for k, v in sample.items()}
 
 
-def make_dataloader(
-    dataset_root: Path, batch_size: int, num_workers: int
-) -> DataLoader:
-    dataset = CommaDataset(dataset_root, window_size=16, transform=ToTensor())
+def make_dataloader(lmdb_path: Path, batch_size: int, num_workers: int) -> DataLoader:
+    dataset = LatentDataset(lmdb_path, transform=to_tensor)
     return DataLoader(
         dataset,
         batch_size=batch_size,
@@ -65,34 +36,23 @@ def prepare_batch(
 ) -> Tuple[torch.Tensor, ...]:
     """
     Returns:
-        video_past:    (B, 3, 8, H, W)
-        video_future:  (B, 3, 8, H, W)
-        actions_past:  (B, 8, 3)
-        actions_future:(B, 8, 3)
+        z_past:         (B, T_lat, C_lat, H_lat, W_lat)
+        z_future:       (B, T_lat, C_lat, H_lat, W_lat)
+        actions_past:   (B, 8, 3)
+        actions_future: (B, 8, 3)
     """
-    frames = batch["image"].float()  # (B, 16, H, W, 3)
-    frames = frames.permute(0, 4, 1, 2, 3)  # (B, 3, 16, H, W)
-    frames = frames / 127.5 - 1.0  # normalize to [-1, 1]
+    latents_past = batch["latent_past"].to(device=device, dtype=dtype)
+    latents_future = batch["latent_future"].to(device=device, dtype=dtype)
+    actions_past = batch["actions_past"].to(device=device, dtype=dtype)
+    actions_future = batch["actions_future"].to(device=device, dtype=dtype)
 
-    orientations = batch["orientations"].float()
-    positions = batch["positions"].float()
-
-    actions = compute_action_deltas(orientations, positions).float()  # (B, 16, 3)
-
-    video_past = frames[:, :, :8].to(device=device, dtype=dtype)
-    video_future = frames[:, :, 8:16].to(device=device, dtype=dtype)
-    actions_past = actions[:, :8].to(device=device, dtype=dtype)
-    actions_future = actions[:, 8:16].to(device=device, dtype=dtype)
-    return video_past, video_future, actions_past, actions_future
+    z_past = latents_past.permute(0, 2, 1, 3, 4)  # (B, T, C, H, W)
+    z_future = latents_future.permute(0, 2, 1, 3, 4)
+    return z_past, z_future, actions_past, actions_future
 
 
-def build_model(device: torch.device, dtype: torch.dtype) -> CosmosVideoARModel:
-    tokenizer = CosmosVideoTokenizer(
-        device=str(device),
-        dtype=dtype,
-    )
-    model = CosmosVideoARModel(
-        tokenizer=tokenizer,
+def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8:
+    model = VideoARTCoreCV8x8x8(
         t_in_latent=1,
         frames_per_latent=8,
         action_dim_raw=3,
@@ -145,6 +105,25 @@ def save_video(pred: torch.Tensor, target: torch.Tensor, fps: int = 4) -> str:
     return path
 
 
+def decode_and_save_video(
+    pred_latent: torch.Tensor,
+    target_latent: torch.Tensor,
+    tokenizer: CosmosVideoTokenizer,
+    fps: int,
+) -> str:
+    """
+    Decode latent predictions and targets to video and write to disk.
+    """
+    with torch.no_grad():
+        pred_video = tokenizer.decode(
+            pred_latent.to(device=tokenizer.device, dtype=tokenizer.dtype)
+        )
+        target_video = tokenizer.decode(
+            target_latent.to(device=tokenizer.device, dtype=tokenizer.dtype)
+        )
+    return save_video(pred_video, target_video, fps=fps)
+
+
 def train(args: argparse.Namespace) -> None:
     device = torch.device(
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -153,6 +132,7 @@ def train(args: argparse.Namespace) -> None:
 
     use_wandb = not args.disable_wandb
     wandb_run = None
+    wandb = None
     if use_wandb:
         try:
             import wandb
@@ -171,9 +151,7 @@ def train(args: argparse.Namespace) -> None:
             config=vars(args),
         )
 
-    dataloader = make_dataloader(
-        Path(args.dataset_root), args.batch_size, args.num_workers
-    )
+    dataloader = make_dataloader(Path(args.lmdb_path), args.batch_size, args.num_workers)
     model = build_model(device, dtype)
     model.train()
 
@@ -181,18 +159,26 @@ def train(args: argparse.Namespace) -> None:
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
 
+    tokenizer_for_logging = None
+    if use_wandb and args.video_interval > 0:
+        tokenizer_for_logging = CosmosVideoTokenizer(
+            device=str(device),
+            dtype=dtype,
+        )
+
     global_step = 0
     for epoch in range(args.epochs):
         for batch in dataloader:
-            video_past, video_future, actions_past, actions_future = prepare_batch(
+            z_past, z_future, actions_past, actions_future = prepare_batch(
                 batch, device, dtype
             )
 
             optimizer.zero_grad(set_to_none=True)
-            pred_future = model(video_past, actions_past, actions_future)
+            pred_future = model(z_past, actions_past, actions_future)
 
             # Align target length with prediction; extra frames are truncated.
-            target = video_future[:, :, : pred_future.shape[2]]
+            target = z_future.permute(0, 2, 1, 3, 4)
+            target = target[:, :, : pred_future.shape[2]]
             loss = F.l1_loss(pred_future, target)
             loss.backward()
             optimizer.step()
@@ -216,10 +202,14 @@ def train(args: argparse.Namespace) -> None:
                 and args.video_interval > 0
                 and global_step > 0
                 and global_step % args.video_interval == 0
+                and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
-                    video_path = save_video(
-                        pred_future.detach(), target.detach(), fps=args.video_fps
+                    video_path = decode_and_save_video(
+                        pred_future.detach(),
+                        target.detach(),
+                        tokenizer_for_logging,
+                        fps=args.video_fps,
                     )
                 wandb.log(
                     {
@@ -244,13 +234,13 @@ def train(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train Cosmos Video AR model on Comma2k19 windows."
+        description="Train VideoARTCoreCV8x8x8 on latent LMDB windows."
     )
     parser.add_argument(
-        "--dataset-root",
-        type=str,
-        default=str(Path(__file__).resolve().parent / "dataset"),
-        help="Path to dataset root containing Chunk_* directories.",
+        "--lmdb-path",
+        type=Path,
+        default=Path(__file__).resolve().parent / "dataset" / "latent.lmdb",
+        help="Path to latent LMDB produced by CommaDataset.export_as_latent_data.",
     )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=0)
