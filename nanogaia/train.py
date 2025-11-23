@@ -209,6 +209,8 @@ def train(args: argparse.Namespace) -> None:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
+    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+    amp_enabled = device.type == "cuda"
 
     tokenizer_for_logging = None
     if use_wandb and config.video_interval > 0:
@@ -225,14 +227,19 @@ def train(args: argparse.Namespace) -> None:
             )
 
             optimizer.zero_grad(set_to_none=True)
-            pred_future = model(z_past, actions_past, actions_future)
+            with torch.autocast(
+                device_type=device.type, dtype=torch.float16, enabled=amp_enabled
+            ):
+                pred_future = model(z_past, actions_past, actions_future)
 
-            # Align target length with prediction; extra frames are truncated.
-            target = z_future.permute(0, 2, 1, 3, 4)
-            target = target[:, :, : pred_future.shape[2]]
-            loss = F.l1_loss(pred_future, target)
-            loss.backward()
-            optimizer.step()
+                # Align target length with prediction; extra frames are truncated.
+                target = z_future.permute(0, 2, 1, 3, 4)
+                target = target[:, :, : pred_future.shape[2]]
+                loss = F.l1_loss(pred_future, target)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             if global_step % config.log_interval == 0:
                 print(
