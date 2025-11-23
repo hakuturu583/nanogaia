@@ -139,11 +139,12 @@ def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8
         c_latent=2,
         frames_per_latent=8,
         action_dim_raw=3,
-        d_model=256,
-        num_layers=4,
-        num_heads=4,
-        dim_feedforward=1024,
-        t_future_latent=1,
+        d_model=128,
+        num_layers=2,
+        num_heads=2,
+        dim_feedforward=512,
+        t_future_latent=16,
+        gradient_checkpointing=True,
     ).to(device=device, dtype=dtype)
     return model
 
@@ -177,7 +178,12 @@ def train(args: argparse.Namespace) -> None:
     device = torch.device(
         config.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
-    dtype = torch.float16 if device.type == "cuda" else torch.float32
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    else:
+        dtype = torch.float32
 
     use_wandb = not config.wandb.disable
     wandb_run = None

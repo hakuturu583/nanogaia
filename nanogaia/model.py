@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 from diffusers import AutoencoderKLCosmos
 from flash_attn.modules.mha import MHA as FlashMHA
+from torch.utils.checkpoint import checkpoint
 
 
 # =========================================================
@@ -237,7 +238,13 @@ class LatentFlattener(nn.Module):
         H, W = self.h, self.w
         assert C == self.c_latent
 
-        z = tokens.view(B, 16, H, W, C)  # (B, FSPQ Level, H, W, C)
+        expected = t_out * H * W
+        if N != expected:
+            raise ValueError(
+                f"tokens shape mismatch: expected {expected} tokens for t_out={t_out}, H={H}, W={W}, got {N}"
+            )
+
+        z = tokens.view(B, t_out, H, W, C)  # (B, T_out, H, W, C)
         z = z.permute(0, 1, 4, 2, 3)  # (B, T, C, H, W)
         return z
 
@@ -391,6 +398,7 @@ class FlashDecoder(nn.Module):
         num_layers: int,
         d_ff: int = 2048,
         dropout: float = 0.1,
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
         self.layers = nn.ModuleList(
@@ -400,12 +408,19 @@ class FlashDecoder(nn.Module):
             ]
         )
         self.norm = nn.LayerNorm(d_model)
+        self.gradient_checkpointing = gradient_checkpointing
 
     def forward(
         self, x: torch.Tensor, cross_kv: torch.Tensor | None = None
     ) -> torch.Tensor:
         for layer in self.layers:
-            x = layer(x, cross_kv)
+            if self.gradient_checkpointing and x.requires_grad:
+                if cross_kv is None:
+                    x = checkpoint(lambda inp: layer(inp, None), x)
+                else:
+                    x = checkpoint(layer, x, cross_kv)
+            else:
+                x = layer(x, cross_kv)
         return self.norm(x)
 
 
@@ -433,7 +448,8 @@ class VideoARTCoreCV8x8x8(nn.Module):
         num_layers: int = 4,
         num_heads: int = 4,
         dim_feedforward: int = 1024,
-        t_future_latent: int | None = None,
+        t_future_latent: int = 16,
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
         self.t_in_latent = t_in_latent
@@ -473,6 +489,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
             n_heads=num_heads,
             num_layers=num_layers,
             d_ff=dim_feedforward,
+            gradient_checkpointing=gradient_checkpointing,
         )
 
         # Transformer hidden (d_model) → VAE latent channel (C_lat)
@@ -541,7 +558,8 @@ class CosmosVideoARModel(nn.Module):
         num_layers: int = 4,
         num_heads: int = 4,
         dim_feedforward: int = 1024,
-        t_future_latent: int | None = None,
+        t_future_latent: int = 16,
+        gradient_checkpointing: bool = False,
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -557,6 +575,7 @@ class CosmosVideoARModel(nn.Module):
             num_heads=num_heads,
             dim_feedforward=dim_feedforward,
             t_future_latent=t_future_latent,
+            gradient_checkpointing=gradient_checkpointing,
         )
 
     def forward(
