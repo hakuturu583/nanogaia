@@ -7,7 +7,6 @@
 # dataset = StreamingLeRobotDataset(repo_id)
 # # dataset = LeRobotDataset(repo_id)
 
-from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 import argparse
 import cv2
@@ -151,8 +150,8 @@ def export_latent_lmdb(dataset_dir: Path, lmdb_name: str = "latent.lmdb") -> Non
 
 
 def main():
-    for i in range(1, 11):
-        prepare_dataset(i)
+    # for i in range(1, 11):
+    #     prepare_dataset(i)
     dataset_dir = Path(os.path.dirname(os.path.abspath(__file__))) / "dataset"
     export_latent_lmdb(dataset_dir)
 

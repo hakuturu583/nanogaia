@@ -18,6 +18,8 @@ dependencies = [
     "flash-attn==v2.7.4.post1; sys_platform == 'linux'",
     "wandb>=0.23.0",
     "weave>=0.52.17",
+    "lmdb>=1.7.5",
+    "tqdm>=4.67.1",
 ]
 
 [build-system]
