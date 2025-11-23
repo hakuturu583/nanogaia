@@ -194,8 +194,6 @@ class CommaDataset(Dataset):
 
         txn = env.begin(write=True)
         for idx in tqdm(range(len(self)), desc="export_as_latent_data"):
-            if idx == 1:
-                break
             sample = self[idx]
             frames = sample["image"].astype(np.float32)
             orientations = np.asarray(sample["orientations"])
