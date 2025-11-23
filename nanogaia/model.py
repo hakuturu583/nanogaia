@@ -116,7 +116,8 @@ class CosmosVideoTokenizer(nn.Module):
         frames = ((frames + 1.0) * 127.5).byte().numpy()
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        # Prefer H.264 for compatibility with most players.
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
         T, H, W, _ = frames.shape
         writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
         for t in range(T):
