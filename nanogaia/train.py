@@ -216,10 +216,10 @@ def train(args: argparse.Namespace) -> None:
             with torch.autocast(
                 device_type=device.type, dtype=dtype, enabled=amp_enabled
             ):
-                pred_future = model(z_past, actions_past, actions_future)
+                delta_future = model(z_past, actions_past, actions_future)
 
                 # Align target length with prediction; extra frames are truncated.
-                loss = F.mse_loss(pred_future, z_future)
+                loss = F.mse_loss(delta_future, z_future - z_past)
 
             if scaler_enabled:
                 scaler.scale(loss).backward()
