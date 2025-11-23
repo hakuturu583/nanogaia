@@ -147,63 +147,26 @@ def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8
     return model
 
 
-def to_uint8_video(frames: torch.Tensor) -> np.ndarray:
-    """
-    frames: (T, C, H, W) in [-1, 1]
-    returns: (T, H, W, 3) uint8 RGB
-    """
-    frames = torch.clamp(frames, -1.0, 1.0)
-    frames = (frames + 1.0) * 127.5
-    frames = frames.permute(0, 2, 3, 1).cpu().numpy().astype(np.uint8)
-    return frames
-
-
-def save_video(pred: torch.Tensor, target: torch.Tensor, fps: int = 4) -> str:
-    """
-    pred/target: (1, C, T, H, W)
-    Writes an mp4 stacking pred|target per frame. Returns file path.
-    """
-    pred = pred[0].permute(1, 0, 2, 3)  # (T, C, H, W)
-    target = target[0].permute(1, 0, 2, 3)
-    pred_np = to_uint8_video(pred)
-    target_np = to_uint8_video(target)
-
-    T, H, W, _ = pred_np.shape
-    frames = []
-    for t in range(T):
-        pred_frame = cv2.cvtColor(pred_np[t], cv2.COLOR_RGB2BGR)
-        tgt_frame = cv2.cvtColor(target_np[t], cv2.COLOR_RGB2BGR)
-        frames.append(np.concatenate([pred_frame, tgt_frame], axis=1))
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    fd, path = tempfile.mkstemp(suffix=".mp4")
-    os.close(fd)
-    writer = cv2.VideoWriter(
-        path, fourcc, fps, (frames[0].shape[1], frames[0].shape[0])
-    )
-    for frame in frames:
-        writer.write(frame)
-    writer.release()
-    return path
-
-
-def decode_and_save_video(
+def save_video(
     pred_latent: torch.Tensor,
     target_latent: torch.Tensor,
     tokenizer: CosmosVideoTokenizer,
-    fps: int,
+    fps: int = 4,
 ) -> str:
     """
-    Decode latent predictions and targets to video and write to disk.
+    Decode latents and write an mp4 by stacking pred | target horizontally.
+    Uses tokenizer.decode_as_video similar to encoder_test.py.
     """
-    with torch.no_grad():
-        pred_video = tokenizer.decode(
-            pred_latent.to(device=tokenizer.device, dtype=tokenizer.dtype)
-        )
-        target_video = tokenizer.decode(
-            target_latent.to(device=tokenizer.device, dtype=tokenizer.dtype)
-        )
-    return save_video(pred_video, target_video, fps=fps)
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+
+    # concat along width in latent space to preserve side-by-side layout after decode
+    combined = torch.cat(
+        [pred_latent.detach().cpu(), target_latent.detach().cpu()], dim=4
+    )
+    # decode_as_video expects (C, T, H, W) or (B, C, T, H, W); we pass first sample
+    tokenizer.decode_as_video(combined[0].numpy(), path, fps=fps)
+    return path
 
 
 def train(args: argparse.Namespace) -> None:
@@ -290,7 +253,7 @@ def train(args: argparse.Namespace) -> None:
                 and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
-                    video_path = decode_and_save_video(
+                    video_path = save_video(
                         pred_future.detach(),
                         target.detach(),
                         tokenizer_for_logging,
