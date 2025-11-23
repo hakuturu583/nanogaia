@@ -194,6 +194,8 @@ class CommaDataset(Dataset):
 
         txn = env.begin(write=True)
         for idx in tqdm(range(len(self)), desc="export_as_latent_data"):
+            if idx == 1:
+                break
             sample = self[idx]
             frames = sample["image"].astype(np.float32)
             orientations = np.asarray(sample["orientations"])
@@ -214,6 +216,10 @@ class CommaDataset(Dataset):
 
             actions_np = np.stack(actions, axis=0).astype(np.float32)
             latents_past, latents_future = self._encode_latents(frames, tokenizer)
+            decodeed = self._decode_latents(latents_past, tokenizer)
+            # print(decodeed[0][0])
+            # print("----")
+            # print(frames[0][0])
             payload = {
                 "latent_past": latents_past,
                 "latent_future": latents_future,
@@ -240,6 +246,7 @@ class CommaDataset(Dataset):
         Convert 16-frame RGB uint8/float32 (T, H, W, 3) into past/future latents.
         """
         video = torch.from_numpy(frames).permute(3, 0, 1, 2)  # (C, T, H, W)
+        video = (video / 127.5) - 1.0
         video = video.unsqueeze(0).to(tokenizer.device)  # (1, C, T, H, W)
 
         video_past, video_future = torch.split(video, 8, dim=2)  # (C, 8, H, W)

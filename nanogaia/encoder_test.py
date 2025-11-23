@@ -31,9 +31,8 @@ def main() -> None:
     default_raw = (
         Path(__file__).resolve().parent
         / "dataset"
-        / "Chunk_3"
-        / "b0c9d2329ad1606b"
-        / "2018-07-27--06-03-57"
+        / "Chunk_1"
+        / "b0c9d2329ad1606b|2018-07-27--06-03-57"
         / "3"
         / "raw_images"
     )
@@ -47,7 +46,7 @@ def main() -> None:
         help=f"Path to raw_images directory (default: {default_raw})",
     )
     parser.add_argument("--start", type=int, default=0, help="First frame index")
-    parser.add_argument("--end", type=int, default=8, help="Last frame index (inclusive)")
+    parser.add_argument("--end", type=int, default=7, help="Last frame index (inclusive)")
     parser.add_argument(
         "--output",
         type=Path,
@@ -66,20 +65,20 @@ def main() -> None:
     print(f"Loaded frames: {frames.shape}")
 
     # Normalize to [-1, 1] and shape to (B, C, T, H, W)
-    video = torch.from_numpy(frames).permute(0, 3, 1, 2)  # (T, C, H, W)
+    video = torch.from_numpy(frames).permute(3, 0, 1, 2)  # (T, C, H, W)
     video = (video / 127.5) - 1.0
     video = video.unsqueeze(0)  # (1, C, T, H, W)
 
-    dtype = torch.bfloat16 if args.device != "cpu" else torch.float32
-    tokenizer = CosmosVideoTokenizer(device=args.device, dtype=dtype)
+    # dtype = torch.bfloat16 if args.device != "cpu" else torch.float32
+    tokenizer = CosmosVideoTokenizer(device=args.device, dtype=torch.bfloat16)
 
     with torch.no_grad():
         latents = tokenizer.encode(video)
         print(f"Latents shape: {latents.shape}")
+        decoded = tokenizer.decode(latents)
+        tokenizer.decode_as_video(latents[0], str(args.output), fps=4)
 
-        out_path = tokenizer.decode_as_video(latents[0], str(args.output), fps=4)
-
-    print(f"Wrote decoded video to: {out_path}")
+    # print(f"Wrote decoded video to: {out_path}")
 
 
 if __name__ == "__main__":
