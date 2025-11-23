@@ -149,28 +149,6 @@ def build_model(device: torch.device, dtype: torch.dtype) -> VideoARTCoreCV8x8x8
     return model
 
 
-def save_video(
-    pred_latent: torch.Tensor,
-    target_latent: torch.Tensor,
-    tokenizer: CosmosVideoTokenizer,
-    fps: int = 4,
-) -> str:
-    """
-    Decode latents and write an mp4 by stacking pred | target horizontally.
-    Uses tokenizer.decode_as_video similar to encoder_test.py.
-    """
-    fd, path = tempfile.mkstemp(suffix=".mp4")
-    os.close(fd)
-
-    # concat along width in latent space to preserve side-by-side layout after decode
-    combined = torch.cat(
-        [pred_latent.detach().cpu(), target_latent.detach().cpu()], dim=4
-    )
-    # decode_as_video expects (C, T, H, W) or (B, C, T, H, W); we pass first sample
-    tokenizer.decode_as_video(combined[0].float().numpy(), path, fps=fps)
-    return path
-
-
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -241,9 +219,7 @@ def train(args: argparse.Namespace) -> None:
                 pred_future = model(z_past, actions_past, actions_future)
 
                 # Align target length with prediction; extra frames are truncated.
-                target = z_future.permute(0, 2, 1, 3, 4)
-                target = target[:, :, : pred_future.shape[2]]
-                loss = F.mse_loss(pred_future, target)
+                loss = F.mse_loss(pred_future, z_future)
 
             if scaler_enabled:
                 scaler.scale(loss).backward()
@@ -275,22 +251,30 @@ def train(args: argparse.Namespace) -> None:
                 and tokenizer_for_logging is not None
             ):
                 with torch.no_grad():
-                    print("Pred futuer / target", pred_future.shape, target.shape)
-                    video_path = save_video(
-                        pred_future.detach().cpu(),
-                        target.detach().cpu(),
-                        tokenizer_for_logging,
-                        fps=config.video_fps,
+                    pred_fd, pred_path = tempfile.mkstemp(suffix=".mp4")
+                    tgt_fd, tgt_path = tempfile.mkstemp(suffix=".mp4")
+                    os.close(pred_fd)
+                    os.close(tgt_fd)
+
+                    tokenizer_for_logging.decode_as_video(
+                        pred_future[0].detach().cpu().float(), pred_path, fps=config.video_fps
+                    )
+                    tokenizer_for_logging.decode_as_video(
+                        z_future[0].detach().cpu().float(), tgt_path, fps=config.video_fps
                     )
                 wandb.log(
                     {
-                        "train/sample_video": wandb.Video(
-                            video_path, fps=config.video_fps, caption="pred | target"
-                        )
+                        "train/sample_pred_video": wandb.Video(
+                            pred_path, fps=config.video_fps, caption="pred"
+                        ),
+                        "train/sample_target_video": wandb.Video(
+                            tgt_path, fps=config.video_fps, caption="target"
+                        ),
                     },
                     step=global_step,
                 )
-                os.remove(video_path)
+                os.remove(pred_path)
+                os.remove(tgt_path)
 
             global_step += 1
             if config.max_steps and global_step >= config.max_steps:
