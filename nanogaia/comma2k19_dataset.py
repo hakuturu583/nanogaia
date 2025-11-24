@@ -46,7 +46,7 @@ class ToTensor(object):
 
 
 class CommaDataset(Dataset):
-    SOURCE_FPS = 20
+    SOURCE_FPS = 25
     TARGET_LATENT_FRAMES = 16
     FRAME_DIGITS = 5
 
