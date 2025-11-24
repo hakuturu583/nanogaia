@@ -139,14 +139,31 @@ def prepare_dataset(chunk_number: int):
     unzip_skip_existing(copy_from, copy_to)
 
 
-def export_latent_lmdb(dataset_dir: Path, lmdb_name: str = "latent.lmdb") -> None:
+def export_latent_lmdb(
+    dataset_dir: Path, lmdb_name: str = "latent.lmdb", downsample_fps: int | None = 5
+) -> None:
     """
     Build LMDB containing 8-frame past/future video and actions from the prepared dataset.
     """
-    dataset = CommaDataset(dataset_dir, window_size=16)
+    if downsample_fps is not None and downsample_fps <= 0:
+        raise ValueError("downsample_fps must be positive or None.")
+
+    downsample_stride = 1
+    window_size = CommaDataset.TARGET_LATENT_FRAMES
+    if downsample_fps:
+        downsample_stride = max(
+            1, int(round(CommaDataset.SOURCE_FPS / downsample_fps))
+        )
+        window_size = CommaDataset.TARGET_LATENT_FRAMES * downsample_stride
+
+    dataset = CommaDataset(dataset_dir, window_size=window_size)
     lmdb_path = dataset_dir / lmdb_name
-    dataset.export_as_latent_data(lmdb_path)
-    print(f"Wrote latent LMDB to: {lmdb_path}")
+    dataset.export_as_latent_data(lmdb_path, downsample_stride=downsample_stride)
+    effective_fps = CommaDataset.SOURCE_FPS / downsample_stride
+    print(
+        f"Wrote latent LMDB to: {lmdb_path} "
+        f"(downsampled to ~{effective_fps:.2f} FPS)"
+    )
 
 
 def main():

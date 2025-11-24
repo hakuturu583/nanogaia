@@ -1,10 +1,10 @@
 lmdb_path: dataset/latent.lmdb
-overfit_test: false
+overfit_test: true
 batch_size: 1
 num_workers: 0
 epochs: 1
 lr: 0.0001
-weight_decay: 0.0001
+weight_decay: 0.000
 log_interval: 10
 video_interval: 1000
 video_fps: 4

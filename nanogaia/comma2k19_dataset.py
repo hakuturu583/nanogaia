@@ -46,7 +46,8 @@ class ToTensor(object):
 
 
 class CommaDataset(Dataset):
-
+    SOURCE_FPS = 20
+    TARGET_LATENT_FRAMES = 16
     FRAME_DIGITS = 5
 
     def __init__(
@@ -152,6 +153,7 @@ class CommaDataset(Dataset):
         tokenizer: CosmosVideoTokenizer | None = None,
         device: str | torch.device | None = None,
         dtype: torch.dtype | None = None,
+        downsample_stride: int = 1,
     ) -> None:
         """
         Export 16-frame windows into an LMDB with 8-frame past/future latents and actions.
@@ -164,9 +166,15 @@ class CommaDataset(Dataset):
         """
         import lmdb
 
-        if self.window_size != 16:
+        if downsample_stride < 1:
+            raise ValueError("downsample_stride must be >= 1")
+
+        expected_window = self.TARGET_LATENT_FRAMES * downsample_stride
+        if self.window_size != expected_window:
             raise ValueError(
-                f"export_as_latent_data requires window_size=16, got {self.window_size}"
+                "export_as_latent_data requires "
+                f"window_size={expected_window} for "
+                f"downsample_stride={downsample_stride}, got {self.window_size}"
             )
 
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -177,9 +185,6 @@ class CommaDataset(Dataset):
 
         lmdb_path = Path(lmdb_path)
         lmdb_path.parent.mkdir(parents=True, exist_ok=True)
-
-        sample = self[0]
-        frames = sample["image"].astype(np.float32)
 
         env = lmdb.open(
             str(lmdb_path),
@@ -195,9 +200,19 @@ class CommaDataset(Dataset):
         txn = env.begin(write=True)
         for idx in tqdm(range(len(self)), desc="export_as_latent_data"):
             sample = self[idx]
-            frames = sample["image"].astype(np.float32)
-            orientations = np.asarray(sample["orientations"])
-            positions = np.asarray(sample["positions"])
+            frames_full = sample["image"].astype(np.float32)
+            orientations_full = np.asarray(sample["orientations"])
+            positions_full = np.asarray(sample["positions"])
+
+            frames = frames_full[::downsample_stride]
+            orientations = orientations_full[::downsample_stride]
+            positions = positions_full[::downsample_stride]
+
+            if frames.shape[0] != self.TARGET_LATENT_FRAMES:
+                raise ValueError(
+                    f"Downsampled window must be {self.TARGET_LATENT_FRAMES} frames, "
+                    f"got {frames.shape[0]}"
+                )
 
             actions: List[np.ndarray] = []
             for t in range(frames.shape[0]):
