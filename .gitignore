@@ -14,3 +14,4 @@ wandb/*
 
 # Artifacts
 *.mp4
+*.gif

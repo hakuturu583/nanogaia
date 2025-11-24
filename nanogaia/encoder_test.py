@@ -52,8 +52,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("encoder_test.mp4"),
-        help="Output mp4 path",
+        default=Path("encoder_test.gif"),
+        help="Output gif path",
     )
     parser.add_argument(
         "--device",
