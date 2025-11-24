@@ -238,6 +238,19 @@ def iterate_batches(
         yield first_batch
 
 
+def average_grad_norm(model: torch.nn.Module) -> float:
+    total_norm = 0.0
+    count = 0
+    for param in model.parameters():
+        if param.grad is None:
+            continue
+        total_norm += param.grad.detach().float().norm().item()
+        count += 1
+    if count == 0:
+        return 0.0
+    return total_norm / count
+
+
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -322,10 +335,13 @@ def train(args: argparse.Namespace) -> None:
 
             if scaler_enabled:
                 scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                grad_norm = average_grad_norm(model)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                grad_norm = average_grad_norm(model)
                 optimizer.step()
 
             if global_step % config.log_interval == 0:
@@ -333,6 +349,7 @@ def train(args: argparse.Namespace) -> None:
                     f"epoch {epoch} step {global_step} "
                     f"loss {loss.item():.4f} mse {loss_mse.item():.4f} "
                     f"mae {loss_mae.item():.4f} entropy {entropy_scalar.item():.4f} "
+                    f"grad_norm {grad_norm:.4f} "
                     f"device {device} dtype {dtype}"
                 )
                 if use_wandb:
@@ -344,6 +361,7 @@ def train(args: argparse.Namespace) -> None:
                             "train/entropy": entropy_scalar.item(),
                             "train/loss_scale": config.loss_scale,
                             "train/epoch": epoch,
+                            "train/avg_grad_norm": grad_norm,
                         },
                         step=global_step,
                     )
