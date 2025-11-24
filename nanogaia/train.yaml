@@ -1,5 +1,5 @@
 lmdb_path: dataset/latent.lmdb
-overfit_test: true
+overfit_test: false
 batch_size: 1
 num_workers: 0
 epochs: 1
