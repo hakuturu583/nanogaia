@@ -450,6 +450,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         t_in_latent: int = 1,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
+        future_action_dim_raw: int | None = None,
         d_model: int = 256,
         num_layers: int = 4,
         num_heads: int = 4,
@@ -461,6 +462,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         self.t_in_latent = t_in_latent
         self.frames_per_latent = frames_per_latent
         self.t_future_latent = t_future_latent or t_in_latent
+        self.action_future_dim_raw = future_action_dim_raw or action_dim_raw
 
         self.flattener = LatentFlattener(
             c_latent=c_latent,
@@ -476,7 +478,7 @@ class VideoARTCoreCV8x8x8(nn.Module):
         )
 
         self.action_future_emb = ActionEmbedding(
-            action_dim_raw=action_dim_raw,
+            action_dim_raw=self.action_future_dim_raw,
             group_size=frames_per_latent,
             d_model=d_model,
             t_latent=self.t_future_latent,
@@ -527,7 +529,16 @@ class VideoARTCoreCV8x8x8(nn.Module):
 
         # 2) actions → (B, T, d_model)
         a_emb = self.action_emb(actions_past)  # (B, T, d_model)
-        a_future_emb = self.action_future_emb(actions_future)  # (B, T_future, d_model)
+
+        if actions_future.shape[-1] < self.action_future_dim_raw:
+            raise ValueError(
+                f"actions_future last dim must be >= {self.action_future_dim_raw}, "
+                f"got {actions_future.shape[-1]}"
+            )
+        actions_future = actions_future[..., : self.action_future_dim_raw]
+        a_future_emb = self.action_future_emb(
+            actions_future
+        )  # (B, T_future, d_model)
 
         # 3) fuse video tokens + action embeddings
         tok = self.fuser(z_tokens, a_emb)  # (B, N, d_model)
@@ -569,6 +580,7 @@ class CosmosVideoARModel(nn.Module):
         t_in_latent: int = 1,
         frames_per_latent: int = 8,
         action_dim_raw: int = 10,
+        future_action_dim_raw: int | None = None,
         d_model: int = 256,
         num_layers: int = 4,
         num_heads: int = 4,
@@ -585,6 +597,7 @@ class CosmosVideoARModel(nn.Module):
             t_in_latent=t_in_latent,
             frames_per_latent=frames_per_latent,
             action_dim_raw=action_dim_raw,
+            future_action_dim_raw=future_action_dim_raw,
             d_model=d_model,
             num_layers=num_layers,
             num_heads=num_heads,
@@ -629,7 +642,8 @@ if __name__ == "__main__":
     B = 1
     T_in = 8
     H, W = 240, 320
-    D_action_raw = 10
+    D_action_raw = 8
+    FUTURE_ACTION_DIM = 7
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
@@ -649,6 +663,7 @@ if __name__ == "__main__":
         t_in_latent=T_in,  # expect T_lat=1 for 8 frames
         frames_per_latent=8,  # 16 frames / 2 latent steps
         action_dim_raw=D_action_raw,
+        future_action_dim_raw=FUTURE_ACTION_DIM,
         d_model=512,
         num_layers=8,
         num_heads=8,
