@@ -1,4 +1,5 @@
 lmdb_path: dataset/latent.lmdb
+overfit_test: false
 batch_size: 1
 num_workers: 0
 epochs: 1
@@ -16,7 +17,7 @@ network:
   d_model: 128
   num_layers: 4
   num_heads: 2
-  dtype: null
+  dtype: fp32
 wandb:
   project: nanogaia
   run_name: null

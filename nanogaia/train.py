@@ -5,7 +5,7 @@ import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Iterator, Tuple
 
 import numpy as np
 import torch
@@ -59,6 +59,7 @@ class NetworkConfig:
 @dataclass
 class TrainConfig:
     lmdb_path: Path = Path(__file__).resolve().parent / "dataset" / "latent.lmdb"
+    overfit_test: bool = False
     batch_size: int = 1
     num_workers: int = 0
     epochs: int = 1
@@ -90,6 +91,7 @@ class TrainConfig:
 
         return cls(
             lmdb_path=lmdb_path,
+            overfit_test=bool(data.get("overfit_test", base.overfit_test)),
             batch_size=int(data.get("batch_size", base.batch_size)),
             num_workers=int(data.get("num_workers", base.num_workers)),
             epochs=int(data.get("epochs", base.epochs)),
@@ -135,12 +137,14 @@ def to_tensor(sample: Dict[str, np.ndarray]) -> Dict[str, torch.Tensor]:
     return {k: torch.from_numpy(v) for k, v in sample.items()}
 
 
-def make_dataloader(lmdb_path: Path, batch_size: int, num_workers: int) -> DataLoader:
+def make_dataloader(
+    lmdb_path: Path, batch_size: int, num_workers: int, overfit_test: bool
+) -> DataLoader:
     dataset = LatentDataset(lmdb_path, transform=to_tensor)
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=not overfit_test,
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
@@ -212,6 +216,28 @@ def build_model(
     return model
 
 
+def iterate_batches(
+    dataloader: DataLoader, overfit_test: bool
+) -> Iterator[dict]:
+    if not overfit_test:
+        yield from dataloader
+        return
+
+    try:
+        first_batch = next(iter(dataloader))
+    except StopIteration as exc:
+        raise ValueError(
+            "Dataloader is empty; cannot run overfit_test mode."
+        ) from exc
+
+    steps_per_epoch = len(dataloader)
+    if steps_per_epoch == 0:
+        raise ValueError("Dataloader is empty; cannot run overfit_test mode.")
+
+    for _ in range(steps_per_epoch):
+        yield first_batch
+
+
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -246,7 +272,7 @@ def train(args: argparse.Namespace) -> None:
         )
 
     dataloader = make_dataloader(
-        config.lmdb_path, config.batch_size, config.num_workers
+        config.lmdb_path, config.batch_size, config.num_workers, config.overfit_test
     )
     model = build_model(device, dtype, config.network)
     model.train()
@@ -267,7 +293,7 @@ def train(args: argparse.Namespace) -> None:
 
     global_step = 0
     for epoch in range(config.epochs):
-        for batch in dataloader:
+        for batch in iterate_batches(dataloader, config.overfit_test):
             z_past, z_future, actions_past, actions_future = prepare_batch(
                 batch, device, dtype
             )
