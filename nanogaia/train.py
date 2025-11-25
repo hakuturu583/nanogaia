@@ -16,8 +16,6 @@ import yaml
 from nanogaia.latent_dataset import LatentDataset
 from nanogaia.model import CosmosVideoTokenizer, VideoARTCoreCV8x8x8
 
-import matplotlib.pyplot as plt
-
 LOG_2_PI_E = math.log(2 * math.pi * math.e)
 
 
@@ -280,7 +278,7 @@ def wandb_log_delta_latent(
     wandb_module.log(stats, step=step)
 
     hist = wandb_module.Histogram(delta.numpy(), num_bins=100)
-    wandb_module.log({f"{tag}/hist": hist}, step=step)
+    wandb_module.log({f"{tag}/histogram": hist}, step=step)
 
     return stats
 
