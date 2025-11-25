@@ -349,10 +349,15 @@ def train(args: argparse.Namespace) -> None:
             ):
                 delta_future = model(z_past, actions_past, actions_future)
                 pred_z = delta_future + z_past
-                target_z = z_future
+                target_delta = z_future - z_past
 
-                loss_mse = F.mse_loss(pred_z, target_z)
-                loss_mae = F.l1_loss(pred_z, target_z)
+                # Normalize deltas for loss stability
+                delta_std = target_delta.detach().float().std().clamp_min(1e-6)
+                pred_delta_norm = delta_future / delta_std
+                target_delta_norm = target_delta / delta_std
+
+                loss_mse = F.mse_loss(pred_delta_norm, target_delta_norm)
+                loss_mae = F.l1_loss(pred_delta_norm, target_delta_norm)
                 mixed_loss = (
                     config.loss_mse_weight * loss_mse
                     + config.loss_mae_weight * loss_mae

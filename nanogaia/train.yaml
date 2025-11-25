@@ -12,12 +12,12 @@ max_steps: 0
 device: null
 loss_mse_weight: 0.8
 loss_mae_weight: 0.2
-loss_scale: 20.0
+loss_scale: 100.0
 network:
   d_model: 128
   num_layers: 4
   num_heads: 2
-  dtype: fp32
+  dtype: bf16
 wandb:
   project: nanogaia
   run_name: null

@@ -73,7 +73,7 @@ class CosmosVideoTokenizer(nn.Module):
 
         video = video.to(self.device, self.dtype)  # already (B, C, T, H, W)
         latents_dist = self.vae.encode(video)
-        z = latents_dist.latent_dist.sample()
+        z = latents_dist.latent_dist.mode()
         return z
 
     @torch.no_grad()
