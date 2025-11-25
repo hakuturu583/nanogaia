@@ -128,5 +128,5 @@ if __name__ == "__main__":
     dataset.decode(
         args.index,
         tokenizer=CosmosVideoTokenizer(),
-        output_path=f"sample_{args.index:08d}.mp4",
+        output_path=f"sample_{args.index:08d}.gif",
     )
