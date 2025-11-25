@@ -251,6 +251,46 @@ def average_grad_norm(model: torch.nn.Module) -> float:
     return total_norm / count
 
 
+def wandb_log_delta_latent(
+    wandb_module: Any,
+    z_past: torch.Tensor,
+    z_future: torch.Tensor,
+    step: int | None = None,
+    tag: str = "delta_latent",
+) -> Dict[str, float]:
+    """
+    Compute delta = z_future - z_past and log stats + histogram to wandb.
+    """
+    import matplotlib.pyplot as plt
+
+    t = min(z_past.shape[2], z_future.shape[2])
+    z_past = z_past[:, :, :t]
+    z_future = z_future[:, :, :t]
+
+    delta = (z_future - z_past).reshape(-1).detach().float().cpu()
+
+    stats = {
+        f"{tag}/mean": delta.mean().item(),
+        f"{tag}/std": delta.std().item(),
+        f"{tag}/max": delta.max().item(),
+        f"{tag}/min": delta.min().item(),
+        f"{tag}/abs_max": delta.abs().max().item(),
+    }
+
+    wandb_module.log(stats, step=step)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(delta.numpy(), bins=100, density=True, alpha=0.8)
+    ax.set_title("Δlatent histogram")
+    ax.set_xlabel("Δlatent value")
+    ax.set_ylabel("Density")
+    ax.grid(True)
+    wandb_module.log({f"{tag}/hist": wandb_module.Image(fig)}, step=step)
+    plt.close(fig)
+
+    return stats
+
+
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -363,6 +403,12 @@ def train(args: argparse.Namespace) -> None:
                             "train/epoch": epoch,
                             "train/avg_grad_norm": grad_norm,
                         },
+                        step=global_step,
+                    )
+                    wandb_log_delta_latent(
+                        wandb,
+                        z_past.detach(),
+                        z_future.detach(),
                         step=global_step,
                     )
 
