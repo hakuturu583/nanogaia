@@ -11,11 +11,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import cv2
 import yaml
 
 from nanogaia.latent_dataset import LatentDataset
 from nanogaia.model import CosmosVideoTokenizer, VideoARTCoreCV8x8x8
+
+import matplotlib.pyplot as plt
 
 LOG_2_PI_E = math.log(2 * math.pi * math.e)
 
@@ -261,7 +262,6 @@ def wandb_log_delta_latent(
     """
     Compute delta = z_future - z_past and log stats + histogram to wandb.
     """
-    import matplotlib.pyplot as plt
 
     t = min(z_past.shape[2], z_future.shape[2])
     z_past = z_past[:, :, :t]
@@ -279,14 +279,8 @@ def wandb_log_delta_latent(
 
     wandb_module.log(stats, step=step)
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.hist(delta.numpy(), bins=100, density=True, alpha=0.8)
-    ax.set_title("Δlatent histogram")
-    ax.set_xlabel("Δlatent value")
-    ax.set_ylabel("Density")
-    ax.grid(True)
-    wandb_module.log({f"{tag}/hist": wandb_module.Image(fig)}, step=step)
-    plt.close(fig)
+    hist = wandb_module.Histogram(delta.numpy(), num_bins=100)
+    wandb_module.log({f"{tag}/hist": hist}, step=step)
 
     return stats
 
