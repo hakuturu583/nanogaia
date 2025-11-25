@@ -11,7 +11,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import cv2
 import yaml
 
 from nanogaia.latent_dataset import LatentDataset
@@ -251,6 +250,39 @@ def average_grad_norm(model: torch.nn.Module) -> float:
     return total_norm / count
 
 
+def wandb_log_delta_latent(
+    wandb_module: Any,
+    z_past: torch.Tensor,
+    z_future: torch.Tensor,
+    step: int | None = None,
+    tag: str = "delta_latent",
+) -> Dict[str, float]:
+    """
+    Compute delta = z_future - z_past and log stats + histogram to wandb.
+    """
+
+    t = min(z_past.shape[2], z_future.shape[2])
+    z_past = z_past[:, :, :t]
+    z_future = z_future[:, :, :t]
+
+    delta = (z_future - z_past).reshape(-1).detach().float().cpu()
+
+    stats = {
+        f"{tag}/mean": delta.mean().item(),
+        f"{tag}/std": delta.std().item(),
+        f"{tag}/max": delta.max().item(),
+        f"{tag}/min": delta.min().item(),
+        f"{tag}/abs_max": delta.abs().max().item(),
+    }
+
+    wandb_module.log(stats, step=step)
+
+    hist = wandb_module.Histogram(delta.numpy(), num_bins=100)
+    wandb_module.log({f"{tag}/histogram": hist}, step=step)
+
+    return stats
+
+
 def train(args: argparse.Namespace) -> None:
     config = load_train_config(args.config)
     config = apply_cli_overrides(config, args)
@@ -363,6 +395,12 @@ def train(args: argparse.Namespace) -> None:
                             "train/epoch": epoch,
                             "train/avg_grad_norm": grad_norm,
                         },
+                        step=global_step,
+                    )
+                    wandb_log_delta_latent(
+                        wandb,
+                        z_past.detach(),
+                        z_future.detach(),
                         step=global_step,
                     )
 
